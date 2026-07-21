@@ -165,7 +165,56 @@ export const bookingsRoute = new Hono()
       .returning();
 
     if (!stripe) {
-      return c.json({ booking, checkoutUrl: null, message: "Stripe not configured yet" }, 201);
+      // No online payment configured (cash-based practice): confirm the booking
+      // immediately, put it on the calendar and send the confirmation emails —
+      // otherwise it would stay stuck in "pending_deposit" forever and never sync.
+      await db
+        .update(bookings)
+        .set({ status: "confirmed", depositStatus: "unpaid" })
+        .where(eq(bookings.id, booking!.id));
+
+      let [client] = await db.select().from(clients).where(eq(clients.email, booking!.email));
+      if (!client) {
+        [client] = await db
+          .insert(clients)
+          .values({ name: booking!.name, email: booking!.email, phone: booking!.phone })
+          .returning();
+      }
+
+      await sendEmail({
+        to: booking!.email,
+        subject: "Booking confirmed — Studio Daï Oakes",
+        html: buildBookingConfirmationHtml({
+          name: booking!.name,
+          serviceName: service.name,
+          date: booking!.date,
+          startTime: booking!.startTime,
+          payFullNow,
+        }),
+      });
+
+      await sendEmail({
+        to: COMPANY.adminEmail,
+        subject: `New booking — ${booking!.name} (${service.name})`,
+        html: buildAdminNewBookingHtml({
+          clientName: booking!.name,
+          clientEmail: booking!.email,
+          clientPhone: booking!.phone,
+          serviceName: service.name,
+          date: booking!.date,
+          startTime: booking!.startTime,
+          amount: amountToCharge,
+          payFullNow,
+        }),
+      });
+
+      await syncBookingToGoogleCalendar(
+        { ...booking!, status: "confirmed" },
+        service.name,
+        service.durationMinutes,
+      );
+
+      return c.json({ booking, checkoutUrl: null, message: "Confirmed (no online payment)" }, 201);
     }
 
     const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
