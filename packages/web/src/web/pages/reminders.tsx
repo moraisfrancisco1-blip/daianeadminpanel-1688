@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
-import { RefreshCw, Copy } from "lucide-react";
-import { useState } from "react";
+import { RefreshCw, Copy, CalendarCheck, CalendarX, Link2Off } from "lucide-react";
+import { useEffect, useState } from "react";
 
 export default function RemindersPage() {
   return (
@@ -26,6 +26,40 @@ function RemindersContent() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["overdue"] }),
   });
 
+  const calendarStatus = useQuery({
+    queryKey: ["google-calendar-status"],
+    queryFn: async () => (await api["google-calendar"].status.$get()).json(),
+  });
+
+  const disconnectCalendar = useMutation({
+    mutationFn: async () => (await api["google-calendar"].disconnect.$post()).json(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["google-calendar-status"] }),
+  });
+
+  const [calendarBanner, setCalendarBanner] = useState<"connected" | "error" | null>(null);
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (e.data?.type === "google-calendar") {
+        setCalendarBanner(e.data.result === "connected" ? "connected" : "error");
+        qc.invalidateQueries({ queryKey: ["google-calendar-status"] });
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [qc]);
+
+  function connectCalendar() {
+    const w = 520;
+    const h = 640;
+    const left = window.screenX + (window.outerWidth - w) / 2;
+    const top = window.screenY + (window.outerHeight - h) / 2;
+    window.open(
+      "/api/google-calendar/connect",
+      "google-calendar-connect",
+      `width=${w},height=${h},left=${left},top=${top}`,
+    );
+  }
+
   const webhookUrl = `${window.location.origin}/api/reminders/run`;
 
   return (
@@ -38,6 +72,59 @@ function RemindersContent() {
         <Button onClick={() => runCheck.mutate()} disabled={runCheck.isPending}>
           <RefreshCw className={`size-4 ${runCheck.isPending ? "animate-spin" : ""}`} /> Run check now
         </Button>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="font-medium mb-1">Google Calendar sync</h3>
+        <p className="text-sm text-muted-foreground mb-3">
+          Confirmed bookings are created directly on your Google Calendar (with a guest invite sent to the
+          patient's email), and busy slots from your calendar are removed from the public booking availability.
+        </p>
+
+        {calendarBanner === "connected" && (
+          <div className="mb-3 rounded-md bg-green-50 text-green-700 text-sm px-3 py-2">
+            Google Calendar connected successfully.
+          </div>
+        )}
+        {calendarBanner === "error" && (
+          <div className="mb-3 rounded-md bg-red-50 text-red-700 text-sm px-3 py-2">
+            Couldn't connect Google Calendar. Please try again.
+          </div>
+        )}
+
+        {!calendarStatus.isLoading && !calendarStatus.data?.configured && (
+          <div className="rounded-md bg-secondary/50 text-sm px-3 py-2 text-muted-foreground">
+            Not configured yet — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the app's environment variables
+            first.
+          </div>
+        )}
+
+        {calendarStatus.data?.configured && (
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            {calendarStatus.data.connected ? (
+              <div className="flex items-center gap-2 text-sm text-green-700">
+                <CalendarCheck className="size-4" /> Connected as {calendarStatus.data.email}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <CalendarX className="size-4" /> Not connected
+              </div>
+            )}
+            <div>
+              {calendarStatus.data.connected ? (
+                <Button
+                  variant="outline"
+                  onClick={() => disconnectCalendar.mutate()}
+                  disabled={disconnectCalendar.isPending}
+                >
+                  <Link2Off className="size-4" /> Disconnect
+                </Button>
+              ) : (
+                <Button onClick={connectCalendar}>Connect Google Calendar</Button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-card border border-border rounded-xl p-5">
