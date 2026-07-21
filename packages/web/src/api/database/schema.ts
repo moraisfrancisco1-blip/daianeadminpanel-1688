@@ -131,6 +131,7 @@ export const bookings = sqliteTable("bookings", {
   invoiceId: integer("invoice_id"),
   notes: text("notes"),
   googleEventId: text("google_event_id"), // Google Calendar event id, once synced
+  postSessionEmailSentAt: integer("post_session_email_sent_at", { mode: "timestamp" }), // review/promo email sent
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -144,6 +145,7 @@ export const googleCalendarAuth = sqliteTable("google_calendar_auth", {
   refreshToken: text("refresh_token").notNull(),
   expiryDate: integer("expiry_date", { mode: "timestamp" }).notNull(),
   connectedEmail: text("connected_email"),
+  selectedCalendarId: text("selected_calendar_id").notNull().default("primary"),
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),

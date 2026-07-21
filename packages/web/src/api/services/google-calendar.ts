@@ -133,7 +133,46 @@ export async function getGoogleCalendarStatus() {
     configured: isGoogleCalendarConfigured(),
     connected: !!row,
     email: row?.connectedEmail ?? null,
+    selectedCalendarId: row?.selectedCalendarId ?? "primary",
   };
+}
+
+/** Returns the calendar id that bookings should be written to / read from. Defaults to "primary". */
+export async function getSelectedCalendarId(): Promise<string> {
+  const [row] = await db.select().from(googleCalendarAuth).where(eq(googleCalendarAuth.id, "primary"));
+  return row?.selectedCalendarId ?? "primary";
+}
+
+export async function setSelectedCalendarId(calendarId: string) {
+  await db
+    .update(googleCalendarAuth)
+    .set({ selectedCalendarId: calendarId, updatedAt: new Date() })
+    .where(eq(googleCalendarAuth.id, "primary"));
+}
+
+/** Lists every calendar on the connected Google account so the admin can pick which one to sync bookings to. */
+export async function listCalendars(): Promise<
+  { id: string; summary: string; primary: boolean; accessRole: string }[]
+> {
+  const token = await getValidAccessToken();
+  if (!token) return [];
+  const res = await fetch(
+    "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250",
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) {
+    console.error("[google-calendar] calendarList failed", await res.text());
+    return [];
+  }
+  const data = (await res.json()) as {
+    items?: { id: string; summary?: string; summaryOverride?: string; primary?: boolean; accessRole?: string }[];
+  };
+  return (data.items ?? []).map((c) => ({
+    id: c.id,
+    summary: c.summaryOverride ?? c.summary ?? c.id,
+    primary: !!c.primary,
+    accessRole: c.accessRole ?? "",
+  }));
 }
 
 export async function disconnectGoogleCalendar() {
@@ -144,6 +183,7 @@ export async function disconnectGoogleCalendar() {
 export async function getGoogleBusyIntervals(dateISO: string): Promise<{ start: number; end: number }[]> {
   const token = await getValidAccessToken();
   if (!token) return [];
+  const calendarId = await getSelectedCalendarId();
 
   // Build local-day start/end as UTC instants using the Europe/Amsterdam offset.
   const timeMin = `${dateISO}T00:00:00`;
@@ -159,7 +199,7 @@ export async function getGoogleBusyIntervals(dateISO: string): Promise<{ start: 
       timeMin,
       timeMax,
       timeZone: TZ,
-      items: [{ id: "primary" }],
+      items: [{ id: calendarId }],
     }),
   });
   if (!res.ok) {
@@ -167,9 +207,9 @@ export async function getGoogleBusyIntervals(dateISO: string): Promise<{ start: 
     return [];
   }
   const data = (await res.json()) as {
-    calendars?: { primary?: { busy?: { start: string; end: string }[] } };
+    calendars?: Record<string, { busy?: { start: string; end: string }[] }>;
   };
-  const busy = data.calendars?.primary?.busy ?? [];
+  const busy = data.calendars?.[calendarId]?.busy ?? [];
   return busy.map((b) => ({
     start: isoTimeToMinutes(b.start),
     end: isoTimeToMinutes(b.end),
@@ -197,6 +237,7 @@ export async function createCalendarEvent(params: {
 }): Promise<string | null> {
   const token = await getValidAccessToken();
   if (!token) return null;
+  const calendarId = await getSelectedCalendarId();
 
   const startDateTime = `${params.date}T${params.startTime}:00`;
   const [h, m] = params.startTime.split(":").map(Number);
@@ -205,7 +246,7 @@ export async function createCalendarEvent(params: {
   const endDateTime = `${params.date}T${endTime}:00`;
 
   const res = await fetch(
-    "https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all",
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?sendUpdates=all`,
     {
       method: "POST",
       headers: {

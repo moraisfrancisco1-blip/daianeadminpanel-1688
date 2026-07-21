@@ -36,6 +36,19 @@ function RemindersContent() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["google-calendar-status"] }),
   });
 
+  const isConnected = !!calendarStatus.data?.connected;
+  const calendars = useQuery({
+    queryKey: ["google-calendar-list"],
+    queryFn: async () => (await api["google-calendar"].calendars.$get()).json(),
+    enabled: isConnected,
+  });
+
+  const selectCalendar = useMutation({
+    mutationFn: async (calendarId: string) =>
+      (await api["google-calendar"]["select-calendar"].$post({ json: { calendarId } })).json(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["google-calendar-status"] }),
+  });
+
   const [calendarBanner, setCalendarBanner] = useState<"connected" | "error" | null>(null);
   useEffect(() => {
     function onMessage(e: MessageEvent) {
@@ -123,6 +136,35 @@ function RemindersContent() {
                 <Button onClick={connectCalendar}>Connect Google Calendar</Button>
               )}
             </div>
+          </div>
+        )}
+
+        {calendarStatus.data?.configured && isConnected && (
+          <div className="mt-4 border-t border-border pt-4">
+            <label className="block text-sm font-medium mb-1">Agenda de agendamentos</label>
+            <p className="text-xs text-muted-foreground mb-2">
+              Escolha em qual agenda da sua conta os agendamentos confirmados devem ser criados. As demais
+              agendas também são respeitadas na disponibilidade.
+            </p>
+            <select
+              className="w-full max-w-md rounded-md border border-border bg-background px-3 py-2 text-sm"
+              value={calendarStatus.data.selectedCalendarId ?? "primary"}
+              disabled={calendars.isLoading || selectCalendar.isPending}
+              onChange={(e) => selectCalendar.mutate(e.target.value)}
+            >
+              {calendars.isLoading && <option>Carregando agendas…</option>}
+              {(calendars.data?.calendars ?? [])
+                .filter((cal) => cal.accessRole === "owner" || cal.accessRole === "writer")
+                .map((cal) => (
+                  <option key={cal.id} value={cal.id}>
+                    {cal.summary}
+                    {cal.primary ? " (principal)" : ""}
+                  </option>
+                ))}
+            </select>
+            {selectCalendar.isPending && (
+              <p className="text-xs text-muted-foreground mt-1">Salvando…</p>
+            )}
           </div>
         )}
       </div>

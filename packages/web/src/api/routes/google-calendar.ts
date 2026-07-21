@@ -6,6 +6,8 @@ import {
   getGoogleAuthUrl,
   getGoogleCalendarStatus,
   isGoogleCalendarConfigured,
+  listCalendars,
+  setSelectedCalendarId,
 } from "../services/google-calendar";
 
 export const googleCalendarRoute = new Hono()
@@ -43,6 +45,17 @@ try { if (window.opener) { window.opener.postMessage({ type: "google-calendar", 
 setTimeout(function(){ window.close(); }, 1200);
 </script></body></html>`;
     return c.html(html);
+  })
+  .get("/calendars", requireAuth, async (c) => {
+    const calendars = await listCalendars();
+    return c.json({ calendars }, 200);
+  })
+  .post("/select-calendar", requireAuth, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const calendarId = typeof body?.calendarId === "string" ? body.calendarId : "";
+    if (!calendarId) return c.json({ message: "calendarId required" }, 400);
+    await setSelectedCalendarId(calendarId);
+    return c.json({ success: true, calendarId }, 200);
   })
   .post("/disconnect", requireAuth, async (c) => {
     await disconnectGoogleCalendar();

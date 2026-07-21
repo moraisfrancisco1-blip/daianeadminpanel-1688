@@ -96,3 +96,54 @@ export function buildAdminInvoicePaidHtml(opts: {
     </p>
   `);
 }
+
+export function buildPostSessionEmailHtml(opts: {
+  name: string;
+  reviewUrl: string;
+  instagramHandle: string;
+  instagramUrl: string;
+  promoAmount: number;
+}) {
+  const firstName = opts.name.split(" ")[0] || opts.name;
+  const promo = `€${opts.promoAmount}`;
+  const button = (href: string, label: string) => `
+    <a href="${href}" style="display:inline-block;background:${TEAL};color:${GOLD};text-decoration:none;
+      font-weight:600;letter-spacing:.5px;padding:14px 28px;border-radius:6px;font-size:15px;">${label}</a>`;
+
+  return wrapper(`
+    <p>Hi ${firstName}, / Oi ${firstName}, / Hoi ${firstName},</p>
+
+    <!-- EN -->
+    <p style="margin-top:18px;"><strong style="color:${TEAL};">ENGLISH &nbsp;·&nbsp; Thank you for your session today.</strong><br/>
+    I truly hope you're already feeling the difference. If you enjoyed our work together, it would mean the world to me if you shared it.</p>
+    <p style="background:${CREAM};border-left:3px solid ${GOLD};padding:12px 14px;border-radius:4px;">
+      <strong>Get ${promo} off your next session:</strong> post an Instagram story tagging
+      <a href="${opts.instagramUrl}" style="color:${COPPER};">${opts.instagramHandle}</a>
+      <em>and</em> leave a Google review. That's it — I'll apply your discount next time. 💛</p>
+
+    <!-- PT -->
+    <p style="margin-top:18px;"><strong style="color:${TEAL};">PORTUGUÊS &nbsp;·&nbsp; Obrigada pela sua sessão de hoje.</strong><br/>
+    Espero que já esteja sentindo a diferença. Se gostou do nosso trabalho, ficaria muito feliz se você compartilhasse.</p>
+    <p style="background:${CREAM};border-left:3px solid ${GOLD};padding:12px 14px;border-radius:4px;">
+      <strong>Ganhe ${promo} de desconto na próxima sessão:</strong> faça um story no Instagram marcando
+      <a href="${opts.instagramUrl}" style="color:${COPPER};">${opts.instagramHandle}</a>
+      <em>e</em> deixe uma avaliação no Google. Só isso — aplico o desconto na sua próxima visita. 💛</p>
+
+    <!-- NL -->
+    <p style="margin-top:18px;"><strong style="color:${TEAL};">NEDERLANDS &nbsp;·&nbsp; Bedankt voor je sessie vandaag.</strong><br/>
+    Ik hoop dat je het verschil al voelt. Als je tevreden bent, zou ik het geweldig vinden als je dat deelt.</p>
+    <p style="background:${CREAM};border-left:3px solid ${GOLD};padding:12px 14px;border-radius:4px;">
+      <strong>Krijg ${promo} korting op je volgende sessie:</strong> plaats een Instagram-story met
+      <a href="${opts.instagramUrl}" style="color:${COPPER};">${opts.instagramHandle}</a>
+      <em>én</em> laat een Google-review achter. Dat is alles — ik verreken de korting bij je volgende bezoek. 💛</p>
+
+    <div style="text-align:center;margin:26px 0 10px;">
+      ${button(opts.reviewUrl, "★  Leave a Google review")}
+    </div>
+    <p style="text-align:center;font-size:12px;color:#6B6259;">
+      <a href="${opts.instagramUrl}" style="color:${COPPER};">Open Instagram → ${opts.instagramHandle}</a>
+    </p>
+
+    <p style="color:${COPPER};font-style:italic;margin-top:22px;">— Daï</p>
+  `);
+}
