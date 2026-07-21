@@ -8,6 +8,7 @@ import { sendEmail } from "../services/email";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml } from "../lib/email-templates";
 import { nextNumber } from "../lib/counters";
 import { COMPANY } from "../lib/company";
+import { createCalendarEvent, getGoogleBusyIntervals } from "../services/google-calendar";
 
 const WORK_DAYS = [1, 3, 5]; // Mon, Wed, Fri
 const WORK_START_MIN = 10 * 60; // 10:00
@@ -58,6 +59,17 @@ export const bookingsRoute = new Hono()
       const dur = serviceDuration.get(b.serviceId) ?? 60;
       return { start: start - BUFFER_MIN, end: start + dur + BUFFER_MIN };
     });
+
+    // Also block out any events already on Daiane's Google Calendar for this date,
+    // so the public site never offers a slot she's already busy with elsewhere.
+    try {
+      const googleBusy = await getGoogleBusyIntervals(date);
+      for (const b of googleBusy) {
+        busyIntervals.push({ start: b.start - BUFFER_MIN, end: b.end + BUFFER_MIN });
+      }
+    } catch (err) {
+      console.error("[bookings] failed to read Google Calendar availability", err);
+    }
 
     const slots: string[] = [];
     for (let start = WORK_START_MIN; start + duration <= WORK_END_MIN; start += SLOT_GRANULARITY_MIN) {
@@ -130,6 +142,8 @@ export const bookingsRoute = new Hono()
         }),
       });
 
+      await syncBookingToGoogleCalendar(booking!, service.name, service.durationMinutes);
+
       return c.json({ booking, checkoutUrl: null, free: true }, 201);
     }
 
@@ -151,7 +165,56 @@ export const bookingsRoute = new Hono()
       .returning();
 
     if (!stripe) {
-      return c.json({ booking, checkoutUrl: null, message: "Stripe not configured yet" }, 201);
+      // No online payment configured (cash-based practice): confirm the booking
+      // immediately, put it on the calendar and send the confirmation emails —
+      // otherwise it would stay stuck in "pending_deposit" forever and never sync.
+      await db
+        .update(bookings)
+        .set({ status: "confirmed", depositStatus: "unpaid" })
+        .where(eq(bookings.id, booking!.id));
+
+      let [client] = await db.select().from(clients).where(eq(clients.email, booking!.email));
+      if (!client) {
+        [client] = await db
+          .insert(clients)
+          .values({ name: booking!.name, email: booking!.email, phone: booking!.phone })
+          .returning();
+      }
+
+      await sendEmail({
+        to: booking!.email,
+        subject: "Booking confirmed — Studio Daï Oakes",
+        html: buildBookingConfirmationHtml({
+          name: booking!.name,
+          serviceName: service.name,
+          date: booking!.date,
+          startTime: booking!.startTime,
+          payFullNow,
+        }),
+      });
+
+      await sendEmail({
+        to: COMPANY.adminEmail,
+        subject: `New booking — ${booking!.name} (${service.name})`,
+        html: buildAdminNewBookingHtml({
+          clientName: booking!.name,
+          clientEmail: booking!.email,
+          clientPhone: booking!.phone,
+          serviceName: service.name,
+          date: booking!.date,
+          startTime: booking!.startTime,
+          amount: amountToCharge,
+          payFullNow,
+        }),
+      });
+
+      await syncBookingToGoogleCalendar(
+        { ...booking!, status: "confirmed" },
+        service.name,
+        service.durationMinutes,
+      );
+
+      return c.json({ booking, checkoutUrl: null, message: "Confirmed (no online payment)" }, 201);
     }
 
     const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
@@ -314,9 +377,39 @@ export const bookingsRoute = new Hono()
               payFullNow: booking.payFullNow,
             }),
           });
+
+          await syncBookingToGoogleCalendar(booking, service?.name ?? "Session", service?.durationMinutes ?? 60);
         }
       }
     }
 
     return c.json({ received: true }, 200);
   });
+
+/**
+ * Creates the Google Calendar event for a just-confirmed booking (sendUpdates: 'all' so the
+ * patient's device gets the calendar invite notification) and stores the event id.
+ * No-ops silently if Google Calendar isn't connected — never blocks the booking flow.
+ */
+async function syncBookingToGoogleCalendar(
+  booking: { id: number; name: string; email: string; phone: string | null; date: string; startTime: string },
+  serviceName: string,
+  durationMinutes: number,
+) {
+  try {
+    const eventId = await createCalendarEvent({
+      bookingId: booking.id,
+      summary: `${serviceName} — ${booking.name}`,
+      description: `Nome: ${booking.name}\nServiço: ${serviceName}\nTelefone: ${booking.phone ?? "—"}`,
+      date: booking.date,
+      startTime: booking.startTime,
+      durationMinutes,
+      attendeeEmail: booking.email,
+    });
+    if (eventId) {
+      await db.update(bookings).set({ googleEventId: eventId }).where(eq(bookings.id, booking.id));
+    }
+  } catch (err) {
+    console.error("[bookings] failed to sync booking to Google Calendar", err);
+  }
+}

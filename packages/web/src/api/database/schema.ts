@@ -130,7 +130,23 @@ export const bookings = sqliteTable("bookings", {
   stripeCheckoutSessionId: text("stripe_checkout_session_id"),
   invoiceId: integer("invoice_id"),
   notes: text("notes"),
+  googleEventId: text("google_event_id"), // Google Calendar event id, once synced
+  postSessionEmailSentAt: integer("post_session_email_sent_at", { mode: "timestamp" }), // review/promo email sent
   createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+// Single-row table (id always "primary") holding the connected Google account's OAuth tokens
+// for the bidirectional Google Calendar integration (creating events + reading busy slots).
+export const googleCalendarAuth = sqliteTable("google_calendar_auth", {
+  id: text("id").primaryKey(), // always "primary"
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  expiryDate: integer("expiry_date", { mode: "timestamp" }).notNull(),
+  connectedEmail: text("connected_email"),
+  selectedCalendarId: text("selected_calendar_id").notNull().default("primary"),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
 });
