@@ -5,13 +5,15 @@ const COPPER = "#AE633F";
 const GOLD = "#C9B36A";
 const CREAM = "#F2ECE4";
 
+const EMAIL_HEADER_LOGO_URL =
+  "https://storage.googleapis.com/runable-templates/cli-uploads%2FX3TC6e19boi9erYmQpoYtDoP9hpMpUYH%2F8Gz9FVin3m02-JdU1H8W3%2Femail-header-logo.png";
+
 function wrapper(bodyHtml: string) {
   return `
   <div style="background:${CREAM};padding:32px 16px;font-family:'Jost',Arial,sans-serif;">
     <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:6px;overflow:hidden;">
-      <div style="background:${TEAL};padding:28px 24px;text-align:center;">
-        <div style="color:${GOLD};font-family:Georgia,serif;letter-spacing:2px;font-size:20px;">STUDIO DAÏ OAKES</div>
-        <div style="color:#F2ECE4cc;font-size:11px;letter-spacing:1px;margin-top:4px;">WOMEN'S RECOVERY &amp; CLINICAL PILATES</div>
+      <div style="background:${TEAL};padding:20px 24px;text-align:center;">
+        <img src="${EMAIL_HEADER_LOGO_URL}" alt="Studio Daï Oakes" width="320" style="max-width:100%;height:auto;display:block;margin:0 auto;" />
       </div>
       <div style="padding:28px 24px;color:#1F2B28;font-size:14px;line-height:1.6;">
         ${bodyHtml}
