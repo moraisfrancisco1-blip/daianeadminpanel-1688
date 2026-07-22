@@ -27,7 +27,7 @@
     },
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "dist-electron/**", ".expo/**"]
+      "outputs": ["dist/**", "dist-api/**", "dist-electron/**", ".expo/**"]
     },
     "lint": {
       "outputs": []
