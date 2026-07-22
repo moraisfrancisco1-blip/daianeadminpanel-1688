@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-// @ts-expect-error generated at build time by `bun run build:api`
+// @ts-ignore - generated at build time by `bun run build:api`
 import app from "../dist-api/app.js";
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
