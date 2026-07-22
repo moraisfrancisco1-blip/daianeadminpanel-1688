@@ -20,6 +20,7 @@
     "db:studio": "bun --env-file=../../.env drizzle-kit studio"
   },
   "dependencies": {
+    "twilio": "^5.10.1",
     "@better-auth/expo": "1.6.19",
     "@libsql/client": "^0.17.2",
     "@radix-ui/react-slot": "^1.2.4",

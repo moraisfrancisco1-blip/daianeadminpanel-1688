@@ -1,3 +1,5 @@
+import { PRACTICE_ADDRESS } from "./company";
+
 const TEAL = "#2E5252";
 const COPPER = "#AE633F";
 const GOLD = "#C9B36A";
@@ -15,7 +17,7 @@ function wrapper(bodyHtml: string) {
         ${bodyHtml}
       </div>
       <div style="background:${CREAM};padding:16px 24px;text-align:center;color:#6B6259;font-size:11px;">
-        Bergstraat 46B, Rotterdam · daianeoakes.com
+        ${PRACTICE_ADDRESS.full} · daianeoakes.com
       </div>
     </div>
   </div>`;
@@ -60,6 +62,31 @@ export function buildBookingConfirmationHtml(opts: {
     <p>Hi ${opts.name},</p>
     <p>Your booking for <strong>${opts.serviceName}</strong> on ${opts.date} at ${opts.startTime} is confirmed.</p>
     <p>${opts.payFullNow ? "Payment received in full." : "€25 deposit received — remainder due at the session."}</p>
+    <p>Please plan to arrive <strong>15 minutes before</strong> your session time.</p>
+    <div style="background:${CREAM};border-radius:6px;padding:14px 16px;margin:16px 0;font-size:12.5px;color:#6B6259;">
+      <p style="margin:0 0 6px;font-weight:600;color:${TEAL};">Booking &amp; Cancellation Policy</p>
+      <p style="margin:0 0 4px;">Reschedule or cancel free of charge up to 24 hours before your session.</p>
+      <p style="margin:0 0 4px;">A deposit (or full payment) secures your slot — late cancellations may forfeit it.</p>
+      <p style="margin:0;">Please arrive on time out of respect for every woman's schedule — yours and the next client's.</p>
+    </div>
+    <p style="color:${COPPER};font-style:italic;">— Studio Daï Oakes</p>
+  `);
+}
+
+export function buildSessionReminderEmailHtml(opts: {
+  clientName: string;
+  serviceName: string;
+  date: string;
+  startTime: string;
+  daysAway: 1 | 2;
+}) {
+  const when = opts.daysAway === 2 ? "in 2 days" : "tomorrow";
+  return wrapper(`
+    <p>Hi ${opts.clientName},</p>
+    <p>Just a friendly reminder that your <strong>${opts.serviceName}</strong> session is coming up ${when} —
+    on <strong>${opts.date} at ${opts.startTime}</strong>.</p>
+    <p>Please plan to arrive <strong>15 minutes before</strong> your session time.</p>
+    <p>Need to reschedule? Just reply to this email or reach out at least 24 hours in advance.</p>
     <p style="color:${COPPER};font-style:italic;">— Studio Daï Oakes</p>
   `);
 }

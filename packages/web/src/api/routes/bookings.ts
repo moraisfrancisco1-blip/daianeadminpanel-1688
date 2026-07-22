@@ -9,6 +9,7 @@ import { buildBookingConfirmationHtml, buildAdminNewBookingHtml } from "../lib/e
 import { nextNumber } from "../lib/counters";
 import { COMPANY } from "../lib/company";
 import { createCalendarEvent, getGoogleBusyIntervals } from "../services/google-calendar";
+import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 
 const WORK_DAYS = [1, 3, 5]; // Mon, Wed, Fri
 const WORK_START_MIN = 10 * 60; // 10:00
@@ -143,6 +144,18 @@ export const bookingsRoute = new Hono()
       });
 
       await syncBookingToGoogleCalendar(booking!, service.name, service.durationMinutes);
+
+      await sendAdminWhatsApp(
+        buildBookingWhatsAppMessage({
+          clientName: booking!.name,
+          clientPhone: booking!.phone,
+          serviceName: service.name,
+          date: booking!.date,
+          startTime: booking!.startTime,
+          amount: 0,
+          payFullNow: true,
+        }),
+      );
 
       return c.json({ booking, checkoutUrl: null, free: true }, 201);
     }
@@ -379,6 +392,18 @@ export const bookingsRoute = new Hono()
           });
 
           await syncBookingToGoogleCalendar(booking, service?.name ?? "Session", service?.durationMinutes ?? 60);
+
+          await sendAdminWhatsApp(
+            buildBookingWhatsAppMessage({
+              clientName: booking.name,
+              clientPhone: booking.phone,
+              serviceName: service?.name ?? "Session",
+              date: booking.date,
+              startTime: booking.startTime,
+              amount: booking.depositAmount,
+              payFullNow: booking.payFullNow,
+            }),
+          );
         }
       }
     }

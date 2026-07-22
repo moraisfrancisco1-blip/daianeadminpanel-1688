@@ -4,8 +4,9 @@ import { invoices, clients, bookings } from "../database/schema";
 import { eq, and, lt, ne, isNull, inArray } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { sendEmail } from "../services/email";
-import { buildReminderEmailHtml, buildPostSessionEmailHtml } from "../lib/email-templates";
+import { buildReminderEmailHtml, buildPostSessionEmailHtml, buildSessionReminderEmailHtml } from "../lib/email-templates";
 import { COMPANY } from "../lib/company";
+import { services } from "../database/schema";
 
 const REMINDER_DAYS_AFTER_DUE = 10;
 
@@ -90,6 +91,67 @@ async function runPostSessionEmails() {
   return sent;
 }
 
+/** Returns the YYYY-MM-DD date string for "today + offsetDays" in Europe/Amsterdam time. */
+function amsterdamDateStrPlusDays(offsetDays: number): string {
+  const nowAmsMs = Date.now() + tzOffsetMinutes(new Date(), "Europe/Amsterdam") * 60000;
+  const target = new Date(nowAmsMs + offsetDays * 24 * 60 * 60 * 1000);
+  const y = target.getUTCFullYear();
+  const mo = String(target.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(target.getUTCDate()).padStart(2, "0");
+  return `${y}-${mo}-${d}`;
+}
+
+/**
+ * Sends "session in 2 days" / "session tomorrow" reminder emails.
+ * Matches confirmed bookings whose `date` is exactly 2 or 1 day(s) from now (Amsterdam time)
+ * and that haven't already received that specific reminder.
+ */
+async function runSessionReminderCheck() {
+  const sent: { bookingId: number; daysAway: 1 | 2 }[] = [];
+
+  for (const daysAway of [2, 1] as const) {
+    const targetDate = amsterdamDateStrPlusDays(daysAway);
+    const sentAtColumn = daysAway === 2 ? bookings.reminder2dSentAt : bookings.reminder1dSentAt;
+
+    const candidates = await db
+      .select()
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.date, targetDate),
+          eq(bookings.status, "confirmed"),
+          isNull(sentAtColumn),
+        ),
+      );
+
+    for (const b of candidates) {
+      if (!b.email) continue;
+      const [service] = await db.select().from(services).where(eq(services.id, b.serviceId));
+
+      await sendEmail({
+        to: b.email,
+        subject: daysAway === 2 ? "Your session is in 2 days" : "Your session is tomorrow",
+        html: buildSessionReminderEmailHtml({
+          clientName: b.name,
+          serviceName: service?.name ?? "your session",
+          date: b.date,
+          startTime: b.startTime,
+          daysAway,
+        }),
+      });
+
+      await db
+        .update(bookings)
+        .set(daysAway === 2 ? { reminder2dSentAt: new Date() } : { reminder1dSentAt: new Date() })
+        .where(eq(bookings.id, b.id));
+
+      sent.push({ bookingId: b.id, daysAway });
+    }
+  }
+
+  return sent;
+}
+
 async function runReminderCheck() {
   const now = new Date();
   const cutoff = new Date(now.getTime() - REMINDER_DAYS_AFTER_DUE * 24 * 60 * 60 * 1000);
@@ -134,7 +196,8 @@ export const remindersRoute = new Hono()
   .post("/run", async (c) => {
     const sent = await runReminderCheck();
     const postSession = await runPostSessionEmails();
-    return c.json({ sent, postSession }, 200);
+    const sessionReminders = await runSessionReminderCheck();
+    return c.json({ sent, postSession, sessionReminders }, 200);
   })
   // Send the post-session review/promo email immediately for one booking.
   .post("/post-session/:bookingId/send-now", requireAuth, async (c) => {
