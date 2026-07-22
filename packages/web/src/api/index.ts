@@ -10,6 +10,7 @@ import { bookingsRoute } from "./routes/bookings";
 import { remindersRoute } from "./routes/reminders";
 import { exportsRoute } from "./routes/exports";
 import { dashboardRoute } from "./routes/dashboard";
+import { googleCalendarRoute } from "./routes/google-calendar";
 
 const app = new Hono()
   .use(cors({ origin: (origin) => origin ?? "*", credentials: true, exposeHeaders: ["set-auth-token"] }))
@@ -28,7 +29,8 @@ const app = new Hono()
   .route("/bookings", bookingsRoute)
   .route("/reminders", remindersRoute)
   .route("/exports", exportsRoute)
-  .route("/dashboard", dashboardRoute);
+  .route("/dashboard", dashboardRoute)
+  .route("/google-calendar", googleCalendarRoute);
 
 export type AppType = typeof app;
 export default app;
