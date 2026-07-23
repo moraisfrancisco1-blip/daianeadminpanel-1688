@@ -36,6 +36,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1023.0",
     "@libsql/client": "^0.17.2",
+    "@plasmicapp/loader-react": "^2.0.14",
     "cloudflare": "^5.2.0",
     "pm2": "^7.0.1"
   }
