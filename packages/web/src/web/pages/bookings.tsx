@@ -4,7 +4,7 @@ import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { StatusPill } from "../components/status-pill";
 import { Link } from "wouter";
-import { Trash2, Loader2 } from "lucide-react";
+import { Trash2, Loader2, Plus } from "lucide-react";
 
 export default function BookingsPage() {
   return (
@@ -55,6 +55,13 @@ function BookingsContent() {
             </Link>
           </p>
         </div>
+        <Link
+          to="/bookings/manual"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
+        >
+          <Plus className="size-4" />
+          Create Manual Booking
+        </Link>
       </div>
 
       {bookings.isLoading ? (

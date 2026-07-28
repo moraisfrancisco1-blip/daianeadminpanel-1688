@@ -11,10 +11,13 @@ import { remindersRoute } from "./routes/reminders";
 import { exportsRoute } from "./routes/exports";
 import { dashboardRoute } from "./routes/dashboard";
 import { googleCalendarRoute } from "./routes/google-calendar";
+import { stripeWebhookRoute } from "./routes/stripe-webhook";
 
 const app = new Hono()
   .use(cors({ origin: (origin) => origin ?? "*", credentials: true, exposeHeaders: ["set-auth-token"] }))
   .on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
+  // Stripe webhook must be registered BEFORE auth middleware (no auth required)
+  .route("/api/stripe-webhook", stripeWebhookRoute)
   .basePath("api")
   .use("*", authMiddleware)
   .onError((err, c) => {

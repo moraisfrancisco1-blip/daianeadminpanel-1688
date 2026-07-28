@@ -6,6 +6,7 @@ import CatalogPage from "./pages/catalog";
 import QuotesPage from "./pages/quotes";
 import InvoicesPage from "./pages/invoices";
 import BookingsPage from "./pages/bookings";
+import BookingManualPage from "./pages/booking-manual";
 import RemindersPage from "./pages/reminders";
 import ExportsPage from "./pages/exports";
 import BookPage from "./pages/book";
@@ -23,6 +24,7 @@ function App() {
         <Route path="/quotes" component={QuotesPage} />
         <Route path="/invoices" component={InvoicesPage} />
         <Route path="/bookings" component={BookingsPage} />
+        <Route path="/bookings/manual" component={BookingManualPage} />
         <Route path="/reminders" component={RemindersPage} />
         <Route path="/exports" component={ExportsPage} />
         <Route path="/book" component={BookPage} />

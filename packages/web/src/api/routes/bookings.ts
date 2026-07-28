@@ -222,7 +222,7 @@ export const bookingsRoute = new Hono()
       });
 
       await syncBookingToGoogleCalendar(
-        { ...booking!, status: "confirmed" },
+        { ...booking! },
         service.name,
         service.durationMinutes,
       );
@@ -280,6 +280,86 @@ export const bookingsRoute = new Hono()
       .leftJoin(services, eq(bookings.serviceId, services.id))
       .orderBy(desc(bookings.createdAt));
     return c.json({ bookings: all }, 200);
+  })
+  // Admin: create a manual booking (confirmed immediately, no payment required)
+  .post("/manual", requireAuth, async (c) => {
+    const body = await c.req.json();
+    const [service] = await db.select().from(services).where(eq(services.id, body.serviceId));
+    if (!service) return c.json({ message: "Invalid service" }, 400);
+
+    // Find or create client
+    let [client] = await db.select().from(clients).where(eq(clients.email, body.email));
+    if (!client) {
+      [client] = await db
+        .insert(clients)
+        .values({ name: body.name, email: body.email, phone: body.phone ?? null })
+        .returning();
+    }
+
+    const [booking] = await db
+      .insert(bookings)
+      .values({
+        clientId: client!.id,
+        name: body.name,
+        email: body.email,
+        phone: body.phone ?? null,
+        serviceId: body.serviceId,
+        date: body.date,
+        startTime: body.startTime,
+        status: "confirmed",
+        depositAmount: body.depositAmount ?? 0,
+        depositStatus: body.depositAmount ? "unpaid" : "paid",
+        payFullNow: true,
+        paymentMethod: body.paymentMethod ?? null,
+        notes: body.notes ?? null,
+      })
+      .returning();
+
+    // Send confirmation emails
+    await sendEmail({
+      to: booking!.email,
+      subject: "Booking confirmed — Studio Daï Oakes",
+      html: buildBookingConfirmationHtml({
+        name: booking!.name,
+        serviceName: service.name,
+        date: booking!.date,
+        startTime: booking!.startTime,
+        payFullNow: true,
+      }),
+    });
+
+    await sendEmail({
+      to: COMPANY.adminEmail,
+      subject: `New booking — ${booking!.name} (${service.name})`,
+      html: buildAdminNewBookingHtml({
+        clientName: booking!.name,
+        clientEmail: booking!.email,
+        clientPhone: booking!.phone,
+        serviceName: service.name,
+        date: booking!.date,
+        startTime: booking!.startTime,
+        amount: booking!.depositAmount,
+        payFullNow: true,
+      }),
+    });
+
+    // Sync to Google Calendar
+    await syncBookingToGoogleCalendar(booking!, service.name, service.durationMinutes);
+
+    // Send WhatsApp notification
+    await sendAdminWhatsApp(
+      buildBookingWhatsAppMessage({
+        clientName: booking!.name,
+        clientPhone: booking!.phone,
+        serviceName: service.name,
+        date: booking!.date,
+        startTime: booking!.startTime,
+        amount: booking!.depositAmount,
+        payFullNow: true,
+      }),
+    );
+
+    return c.json({ booking }, 201);
   })
   .put("/:id/status", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));

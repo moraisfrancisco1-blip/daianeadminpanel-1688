@@ -17,6 +17,7 @@ export const clients = sqliteTable("clients", {
   dateOfBirth: integer("date_of_birth", { mode: "timestamp" }),
   notes: text("notes"),
   debtorNumber: text("debtor_number"),
+  stripeCustomerId: text("stripe_customer_id").unique(),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -85,6 +86,8 @@ export const invoices = sqliteTable("invoices", {
   paidAt: integer("paid_at", { mode: "timestamp" }),
   lastReminderAt: integer("last_reminder_at", { mode: "timestamp" }),
   reminderCount: integer("reminder_count").notNull().default(0),
+  stripeInvoiceId: text("stripe_invoice_id").unique(),
+  stripePaymentIntentId: text("stripe_payment_intent_id").unique(),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),

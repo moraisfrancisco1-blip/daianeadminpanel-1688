@@ -9,6 +9,7 @@ import { generateInvoicePdf } from "../lib/invoice-pdf";
 import { buildInvoiceEmailHtml, buildAdminInvoicePaidHtml } from "../lib/email-templates";
 import { sendEmail } from "../services/email";
 import { COMPANY } from "../lib/company";
+import { createStripeInvoice, finalizeStripeInvoice, voidStripeInvoice, deleteStripeInvoice } from "../services/stripe-sync";
 
 export const invoicesRoute = new Hono()
   .get("/", requireAuth, async (c) => {
@@ -48,6 +49,34 @@ export const invoicesRoute = new Hono()
       ? new Date(body.dueDate)
       : new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
 
+    // Get client to check for stripeCustomerId
+    const [client] = await db.select().from(clients).where(eq(clients.id, body.clientId));
+    
+    // Create invoice in Stripe if client has stripeCustomerId
+    let stripeInvoiceId: string | null = null;
+    let stripePaymentIntentId: string | null = null;
+    
+    if (client?.stripeCustomerId) {
+      const stripeResult = await createStripeInvoice({
+        stripeCustomerId: client.stripeCustomerId,
+        invoiceNumber,
+        issueDate,
+        dueDate,
+        items: lineItems.map((item) => ({
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          vatRate: item.vatRate,
+        })),
+        notes: body.notes ?? null,
+      });
+      
+      if (stripeResult) {
+        stripeInvoiceId = stripeResult.stripeInvoiceId;
+        stripePaymentIntentId = stripeResult.stripePaymentIntentId;
+      }
+    }
+
     const [invoice] = await db
       .insert(invoices)
       .values({
@@ -60,6 +89,8 @@ export const invoicesRoute = new Hono()
         subtotal,
         vatTotal,
         total,
+        stripeInvoiceId,
+        stripePaymentIntentId,
       })
       .returning();
 
@@ -80,9 +111,24 @@ export const invoicesRoute = new Hono()
   .put("/:id/status", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
     const { status } = await c.req.json();
+    
+    // Get existing invoice to check for stripeInvoiceId
+    const [existingInvoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+    if (!existingInvoice) return c.json({ message: "Not found" }, 404);
+    
     const values: Record<string, unknown> = { status };
     if (status === "paid") values.paidAt = new Date();
     else values.paidAt = null;
+    
+    // Sync status with Stripe if invoice has stripeInvoiceId
+    if (existingInvoice.stripeInvoiceId) {
+      if (status === "cancelled") {
+        // Void the invoice in Stripe
+        await voidStripeInvoice(existingInvoice.stripeInvoiceId);
+      }
+      // Note: "paid" status is typically synced via webhook from Stripe
+    }
+    
     const [invoice] = await db.update(invoices).set(values).where(eq(invoices.id, id)).returning();
 
     if (status === "paid" && invoice) {
@@ -208,11 +254,25 @@ export const invoicesRoute = new Hono()
       attachments: [{ filename: `invoice-${invoice.invoiceNumber}.pdf`, content: pdfBuffer }],
     });
 
+    // Finalize invoice in Stripe if it has stripeInvoiceId
+    if (invoice.stripeInvoiceId) {
+      await finalizeStripeInvoice(invoice.stripeInvoiceId);
+    }
+
     await db.update(invoices).set({ status: "sent" }).where(eq(invoices.id, id));
     return c.json({ success: true }, 200);
   })
   .delete("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
+    
+    // Get existing invoice to check for stripeInvoiceId
+    const [existingInvoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+    
+    // Delete invoice from Stripe if it has stripeInvoiceId and is still a draft
+    if (existingInvoice?.stripeInvoiceId && existingInvoice.status === "draft") {
+      await deleteStripeInvoice(existingInvoice.stripeInvoiceId);
+    }
+    
     await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, id));
     await db.delete(payments).where(eq(payments.invoiceId, id));
     await db.delete(invoices).where(eq(invoices.id, id));
