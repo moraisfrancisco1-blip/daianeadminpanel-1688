@@ -6,6 +6,22 @@ import { StatusPill } from "../components/status-pill";
 import { Link } from "wouter";
 import { Trash2, Loader2, Plus } from "lucide-react";
 
+type BookingItem = {
+  id: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  serviceId: number | null;
+  serviceName: string | null;
+  date: string;
+  startTime: string;
+  status: string;
+  depositAmount: number;
+  depositStatus: string;
+  payFullNow: boolean;
+  invoiceId: number | null;
+};
+
 export default function BookingsPage() {
   return (
     <Protected>
@@ -20,7 +36,11 @@ function BookingsContent() {
 
   const bookings = useQuery({
     queryKey: ["bookings"],
-    queryFn: async () => (await api.bookings.$get()).json(),
+    queryFn: async (): Promise<{ bookings: BookingItem[] }> => {
+      const res = await api.bookings.$get();
+      const data = await res.json();
+      return data as { bookings: BookingItem[] };
+    },
   });
 
   const deleteBooking = useMutation({

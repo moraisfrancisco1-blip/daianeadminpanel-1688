@@ -226,6 +226,8 @@ function isoTimeToMinutes(iso: string): number {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
+const DAINE_EMAIL = "daiane.oakes@gmail.com";
+
 export async function createCalendarEvent(params: {
   bookingId: number;
   summary: string;
@@ -245,6 +247,12 @@ export async function createCalendarEvent(params: {
   const endTime = `${String(Math.floor(endTotal / 60)).padStart(2, "0")}:${String(endTotal % 60).padStart(2, "0")}`;
   const endDateTime = `${params.date}T${endTime}:00`;
 
+  // Build attendees list: patient + Daiane (if patient email is different from Daiane's)
+  const attendees: { email: string }[] = [{ email: params.attendeeEmail }];
+  if (params.attendeeEmail.toLowerCase() !== DAINE_EMAIL.toLowerCase()) {
+    attendees.push({ email: DAINE_EMAIL });
+  }
+
   const res = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?sendUpdates=all`,
     {
@@ -258,7 +266,7 @@ export async function createCalendarEvent(params: {
         description: params.description,
         start: { dateTime: startDateTime, timeZone: TZ },
         end: { dateTime: endDateTime, timeZone: TZ },
-        attendees: [{ email: params.attendeeEmail }],
+        attendees,
         reminders: { useDefault: true },
       }),
     },
