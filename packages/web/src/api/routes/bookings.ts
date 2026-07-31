@@ -328,6 +328,39 @@ export const bookingsRoute = new Hono()
     // Determine if this is truly a full payment or just a deposit
     const isFullPayment = booking!.depositAmount >= service.price;
 
+    // If deposit is unpaid, create a Stripe checkout session for the deposit
+    let checkoutUrl: string | null = null;
+    if (booking!.depositStatus === "unpaid" && booking!.depositAmount > 0 && stripe) {
+      try {
+        const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
+        const session = await stripe.checkout.sessions.create({
+          mode: "payment",
+          line_items: [
+            {
+              price_data: {
+                currency: "eur",
+                product_data: {
+                  name: `${service.name} — booking deposit`,
+                },
+                unit_amount: Math.round(booking!.depositAmount * 100),
+              },
+              quantity: 1,
+            },
+          ],
+          success_url: `${origin}/book/confirmed?booking=${booking!.id}`,
+          cancel_url: `${origin}/bookings`,
+          metadata: { bookingId: String(booking!.id) },
+        });
+        checkoutUrl = session.url;
+        await db
+          .update(bookings)
+          .set({ stripeCheckoutSessionId: session.id })
+          .where(eq(bookings.id, booking!.id));
+      } catch (err) {
+        console.error("[bookings/manual] failed to create Stripe checkout for deposit", err);
+      }
+    }
+
     // Send confirmation emails
     await sendEmail({
       to: booking!.email,
@@ -343,6 +376,7 @@ export const bookingsRoute = new Hono()
         paymentMethod: booking!.paymentMethod,
         payFullNow: isFullPayment,
         servicePrice: service.price,
+        checkoutUrl,
       }),
     });
 
