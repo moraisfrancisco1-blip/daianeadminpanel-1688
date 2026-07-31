@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { StatusPill } from "../components/status-pill";
 import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
-import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2 } from "lucide-react";
+import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil } from "lucide-react";
 import { downloadFile } from "../lib/download";
 
 export default function InvoicesPage() {
@@ -16,9 +16,36 @@ export default function InvoicesPage() {
   );
 }
 
+interface ClientItem {
+  id: number;
+  name: string;
+}
+
+interface ServiceItem {
+  id: number;
+  name: string;
+  price: number;
+  vatRate: number;
+}
+
+interface InvoiceRow {
+  id: number;
+  invoiceNumber: string;
+  clientName: string | null;
+  clientId: number;
+  status: string;
+  dueDate: string;
+  total: number;
+  paidAt: string | null;
+  reminderCount: number;
+  issueDate: string;
+}
+
 function InvoicesContent() {
   const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
   const [clientId, setClientId] = useState<number | null>(null);
+  const [invoiceNumber, setInvoiceNumber] = useState("");
   const [items, setItems] = useState<LineItemDraft[]>([{ description: "", quantity: 1, unitPrice: 0, vatRate: 0.09 }]);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const qc = useQueryClient();
@@ -40,31 +67,78 @@ function InvoicesContent() {
     }
   }
 
-  const invoices = useQuery({
+  const { data: invoicesData, isLoading: invoicesLoading } = useQuery({
     queryKey: ["invoices"],
-    queryFn: async () => (await api.invoices.$get()).json(),
-  });
-  const clients = useQuery({
-    queryKey: ["clients"],
-    queryFn: async () => (await api.clients.$get()).json(),
-  });
-  const services = useQuery({
-    queryKey: ["services"],
-    queryFn: async () => (await api.services.$get()).json(),
-  });
-
-  const createInvoice = useMutation({
-    mutationFn: async () => (await api.invoices.$post({ json: { clientId, items } })).json(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["invoices"] });
-      setShowForm(false);
-      setItems([{ description: "", quantity: 1, unitPrice: 0, vatRate: 0.09 }]);
+    queryFn: async () => {
+      const res = await api.invoices.$get();
+      const data = await res.json();
+      return data as { invoices: InvoiceRow[] };
     },
   });
 
+  const { data: clientsData } = useQuery({
+    queryKey: ["clients"],
+    queryFn: async () => {
+      const res = await api.clients.$get();
+      const data = await res.json();
+      return data as { clients: ClientItem[] };
+    },
+  });
+
+  const { data: servicesData } = useQuery({
+    queryKey: ["services"],
+    queryFn: async () => {
+      const res = await api.services.$get();
+      const data = await res.json();
+      return data as { services: ServiceItem[] };
+    },
+  });
+
+  const createInvoice = useMutation({
+    mutationFn: async () => {
+      const res = await api.invoices.$post({ json: { clientId, items } });
+      return await res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setShowForm(false);
+      resetForm();
+    },
+  });
+
+  const updateInvoice = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/invoices/${editId}/edit`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          invoiceNumber: invoiceNumber || undefined,
+          items,
+          status: undefined, // keep existing
+        }),
+      });
+      return await res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      setShowForm(false);
+      setEditId(null);
+      resetForm();
+      showToast("success", "Invoice updated.");
+    },
+    onError: () => showToast("error", "Failed to update invoice."),
+  });
+
   const markPaid = useMutation({
-    mutationFn: async (id: number) =>
-      (await api.invoices[":id"].status.$put({ param: { id: String(id) }, json: { status: "paid" } })).json(),
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/invoices/${id}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "paid" }),
+      });
+      return await res.json();
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["invoices"] }),
   });
 
@@ -85,7 +159,10 @@ function InvoicesContent() {
   });
 
   const deleteInvoice = useMutation({
-    mutationFn: async (id: number) => (await api.invoices[":id"].$delete({ param: { id: String(id) } })).json(),
+    mutationFn: async (id: number) => {
+      const res = await api.invoices[":id"].$delete({ param: { id: String(id) } });
+      return await res.json();
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["invoices"] });
       showToast("success", "Invoice deleted.");
@@ -98,6 +175,54 @@ function InvoicesContent() {
       deleteInvoice.mutate(id);
     }
   }
+
+  function resetForm() {
+    setClientId(null);
+    setInvoiceNumber("");
+    setItems([{ description: "", quantity: 1, unitPrice: 0, vatRate: 0.09 }]);
+  }
+
+  function openNewForm() {
+    setEditId(null);
+    resetForm();
+    setShowForm(true);
+  }
+
+  async function openEditForm(inv: InvoiceRow) {
+    try {
+      const res = await fetch(`/api/invoices/${inv.id}`);
+      const data = await res.json();
+      if (!res.ok) return;
+      setEditId(inv.id);
+      setClientId(data.invoice.clientId);
+      setInvoiceNumber(data.invoice.invoiceNumber);
+      setItems(
+        (data.items ?? []).map((i: any) => ({
+          description: i.description,
+          serviceId: i.serviceId ?? null,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          vatRate: i.vatRate,
+        })),
+      );
+      setShowForm(true);
+    } catch {
+      showToast("error", "Failed to load invoice details.");
+    }
+  }
+
+  function handleSubmit() {
+    if (editId !== null) {
+      updateInvoice.mutate();
+    } else {
+      createInvoice.mutate();
+    }
+  }
+
+  const isEditing = editId !== null;
+  const invoices = invoicesData?.invoices ?? [];
+  const clients = clientsData?.clients ?? [];
+  const services = servicesData?.services ?? [];
 
   return (
     <div className="space-y-6">
@@ -113,14 +238,14 @@ function InvoicesContent() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-display text-3xl font-semibold">Invoices</h1>
-          <p className="text-muted-foreground mt-1">{invoices.data?.invoices.length ?? 0} invoices</p>
+          <p className="text-muted-foreground mt-1">{invoices.length} invoices</p>
         </div>
-        <Button onClick={() => setShowForm(true)}>
+        <Button onClick={openNewForm}>
           <Plus className="size-4" /> New invoice
         </Button>
       </div>
 
-      {invoices.isLoading ? (
+      {invoicesLoading ? (
         <div className="space-y-2">
           {[...Array(6)].map((_, i) => (
             <div key={i} className="h-14 rounded-lg bg-muted animate-pulse" />
@@ -141,7 +266,7 @@ function InvoicesContent() {
               </tr>
             </thead>
             <tbody>
-              {(invoices.data?.invoices ?? []).map((inv) => (
+              {invoices.map((inv) => (
                 <tr key={inv.id} className="border-t border-border hover:bg-accent/40 transition-colors">
                   <td className="px-4 py-3 font-medium">{inv.invoiceNumber}</td>
                   <td className="px-4 py-3">{inv.clientName ?? "—"}</td>
@@ -178,6 +303,13 @@ function InvoicesContent() {
                           <Send className="size-4" />
                         )}
                       </button>
+                      <button
+                        onClick={() => openEditForm(inv)}
+                        className="text-muted-foreground hover:text-primary"
+                        title="Edit invoice"
+                      >
+                        <Pencil className="size-4" />
+                      </button>
                       {inv.status !== "paid" && (
                         <button
                           onClick={() => markPaid.mutate(inv.id)}
@@ -203,7 +335,7 @@ function InvoicesContent() {
                   </td>
                 </tr>
               ))}
-              {(invoices.data?.invoices ?? []).length === 0 && (
+              {invoices.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                     No invoices yet.
@@ -219,29 +351,44 @@ function InvoicesContent() {
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-card rounded-xl p-6 w-full max-w-2xl space-y-4 relative">
-            <button onClick={() => setShowForm(false)} className="absolute top-4 right-4 text-muted-foreground">
+            <button onClick={() => { setShowForm(false); setEditId(null); resetForm(); }} className="absolute top-4 right-4 text-muted-foreground">
               <X className="size-4" />
             </button>
-            <h2 className="font-display text-xl font-semibold">New invoice</h2>
+            <h2 className="font-display text-xl font-semibold">
+              {isEditing ? "Edit invoice" : "New invoice"}
+            </h2>
+            
+            <input
+              type="text"
+              placeholder="Invoice number (e.g. 2026-0141)"
+              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+              value={invoiceNumber}
+              onChange={(e) => setInvoiceNumber(e.target.value)}
+            />
+            
             <select
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
               value={clientId ?? ""}
               onChange={(e) => setClientId(Number(e.target.value))}
             >
               <option value="">Select client…</option>
-              {(clients.data?.clients ?? []).map((c) => (
+              {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
               ))}
             </select>
-            <LineItemEditor items={items} onChange={setItems} services={services.data?.services ?? []} />
+            <LineItemEditor items={items} onChange={setItems} services={services} />
             <Button
               className="w-full"
-              disabled={!clientId || createInvoice.isPending}
-              onClick={() => createInvoice.mutate()}
+              disabled={!clientId || createInvoice.isPending || updateInvoice.isPending}
+              onClick={handleSubmit}
             >
-              {createInvoice.isPending ? "Creating…" : "Create invoice"}
+              {createInvoice.isPending || updateInvoice.isPending
+                ? "Saving…"
+                : isEditing
+                  ? "Update invoice"
+                  : "Create invoice"}
             </Button>
           </div>
         </div>

@@ -5,7 +5,7 @@ import { eq, desc, and } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { stripe } from "../services/stripe";
 import { sendEmail } from "../services/email";
-import { buildBookingConfirmationHtml, buildAdminNewBookingHtml } from "../lib/email-templates";
+import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildRemainderPaymentEmailHtml } from "../lib/email-templates";
 import { nextNumber } from "../lib/counters";
 import { COMPANY } from "../lib/company";
 import { createCalendarEvent, getGoogleBusyIntervals } from "../services/google-calendar";
@@ -124,7 +124,12 @@ export const bookingsRoute = new Hono()
           serviceName: service.name,
           date: booking!.date,
           startTime: booking!.startTime,
+          durationMinutes: service.durationMinutes,
+          depositAmount: 0,
+          depositStatus: "paid",
+          paymentMethod: null,
           payFullNow: true,
+          servicePrice: service.price,
         }),
       });
 
@@ -202,7 +207,12 @@ export const bookingsRoute = new Hono()
           serviceName: service.name,
           date: booking!.date,
           startTime: booking!.startTime,
+          durationMinutes: service.durationMinutes,
+          depositAmount: amountToCharge,
+          depositStatus: "unpaid",
+          paymentMethod: body.paymentMethod ?? null,
           payFullNow,
+          servicePrice: service.price,
         }),
       });
 
@@ -315,6 +325,9 @@ export const bookingsRoute = new Hono()
       })
       .returning();
 
+    // Determine if this is truly a full payment or just a deposit
+    const isFullPayment = booking!.depositAmount >= service.price;
+
     // Send confirmation emails
     await sendEmail({
       to: booking!.email,
@@ -324,7 +337,12 @@ export const bookingsRoute = new Hono()
         serviceName: service.name,
         date: booking!.date,
         startTime: booking!.startTime,
-        payFullNow: true,
+        durationMinutes: service.durationMinutes,
+        depositAmount: booking!.depositAmount,
+        depositStatus: booking!.depositStatus,
+        paymentMethod: booking!.paymentMethod,
+        payFullNow: isFullPayment,
+        servicePrice: service.price,
       }),
     });
 
@@ -339,7 +357,7 @@ export const bookingsRoute = new Hono()
         date: booking!.date,
         startTime: booking!.startTime,
         amount: booking!.depositAmount,
-        payFullNow: true,
+        payFullNow: isFullPayment,
       }),
     });
 
@@ -355,7 +373,7 @@ export const bookingsRoute = new Hono()
         date: booking!.date,
         startTime: booking!.startTime,
         amount: booking!.depositAmount,
-        payFullNow: true,
+        payFullNow: isFullPayment,
       }),
     );
 
@@ -366,6 +384,91 @@ export const bookingsRoute = new Hono()
     const { status } = await c.req.json();
     const [booking] = await db.update(bookings).set({ status }).where(eq(bookings.id, id)).returning();
     return c.json({ booking }, 200);
+  })
+  // Admin: send remainder payment email (10 min before session ends)
+  .post("/:id/send-remainder-email", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    
+    // Get booking with service details
+    const [booking] = await db
+      .select({
+        id: bookings.id,
+        name: bookings.name,
+        email: bookings.email,
+        date: bookings.date,
+        startTime: bookings.startTime,
+        depositAmount: bookings.depositAmount,
+        depositStatus: bookings.depositStatus,
+        serviceId: bookings.serviceId,
+        remainderEmailSentAt: bookings.remainderEmailSentAt,
+      })
+      .from(bookings)
+      .where(eq(bookings.id, id));
+    
+    if (!booking) return c.json({ message: "Booking not found" }, 404);
+    
+    // Check if remainder email was already sent
+    if (booking.remainderEmailSentAt) {
+      return c.json({ message: "Remainder email already sent" }, 400);
+    }
+    
+    // Check if there's actually a remainder to pay
+    const [service] = await db.select().from(services).where(eq(services.id, booking.serviceId));
+    if (!service) return c.json({ message: "Service not found" }, 404);
+    
+    const remainder = service.price - booking.depositAmount;
+    if (remainder <= 0) {
+      return c.json({ message: "No remainder to pay" }, 400);
+    }
+    
+    // Create Stripe checkout session for remainder
+    if (!stripe) {
+      return c.json({ message: "Stripe not configured" }, 400);
+    }
+    
+    const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: [
+        {
+          price_data: {
+            currency: "eur",
+            product_data: {
+              name: `${service.name} — remaining payment`,
+            },
+            unit_amount: Math.round(remainder * 100),
+          },
+          quantity: 1,
+        },
+      ],
+      success_url: `${origin}/book/confirmed?booking=${booking.id}`,
+      cancel_url: `${origin}/bookings`,
+      metadata: { bookingId: String(booking.id), type: "remainder" },
+    });
+    
+    // Send remainder payment email
+    const checkoutUrl = session.url ?? `${origin}/bookings`;
+    await sendEmail({
+      to: booking.email,
+      subject: "Payment reminder — Studio Daï Oakes",
+      html: buildRemainderPaymentEmailHtml({
+        name: booking.name,
+        serviceName: service.name,
+        date: booking.date,
+        startTime: booking.startTime,
+        depositAmount: booking.depositAmount,
+        servicePrice: service.price,
+        checkoutUrl,
+      }),
+    });
+    
+    // Mark email as sent
+    await db
+      .update(bookings)
+      .set({ remainderEmailSentAt: new Date() })
+      .where(eq(bookings.id, id));
+    
+    return c.json({ success: true, checkoutUrl: session.url }, 200);
   })
   .delete("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
@@ -444,6 +547,8 @@ export const bookingsRoute = new Hono()
 
           await db.update(bookings).set({ invoiceId: invoice!.id }).where(eq(bookings.id, bookingId));
 
+          const isFullPayment = booking.payFullNow && booking.depositAmount >= (service?.price ?? 0);
+
           await sendEmail({
             to: booking.email,
             subject: "Booking confirmed — Studio Daï Oakes",
@@ -452,7 +557,12 @@ export const bookingsRoute = new Hono()
               serviceName: service?.name ?? "Session",
               date: booking.date,
               startTime: booking.startTime,
-              payFullNow: booking.payFullNow,
+              durationMinutes: service?.durationMinutes ?? 60,
+              depositAmount: booking.depositAmount,
+              depositStatus: "paid",
+              paymentMethod: booking.paymentMethod,
+              payFullNow: isFullPayment,
+              servicePrice: service?.price ?? 0,
             }),
           });
 
@@ -467,7 +577,7 @@ export const bookingsRoute = new Hono()
               date: booking.date,
               startTime: booking.startTime,
               amount: booking.depositAmount,
-              payFullNow: booking.payFullNow,
+              payFullNow: isFullPayment,
             }),
           });
 

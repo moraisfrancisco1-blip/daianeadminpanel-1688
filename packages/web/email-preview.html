@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Preview — Studio Daï Oakes</title>
+  <link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #e8e0d4;
+      font-family: 'Jost', Arial, sans-serif;
+    }
+    .preview-container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .preview-header {
+      background: #2E5252;
+      color: #C9B36A;
+      padding: 16px 24px;
+      text-align: center;
+      border-radius: 6px 6px 0 0;
+      font-size: 14px;
+      letter-spacing: 1px;
+    }
+    .scenario-tabs {
+      display: flex;
+      gap: 8px;
+      padding: 16px;
+      background: #fff;
+      border-radius: 0 0 6px 6px;
+      margin-bottom: 24px;
+    }
+    .scenario-tabs button {
+      flex: 1;
+      padding: 10px 8px;
+      border: 1px solid #C9B36A;
+      background: transparent;
+      color: #2E5252;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: 'Jost', Arial, sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .scenario-tabs button.active {
+      background: #2E5252;
+      color: #C9B36A;
+      border-color: #2E5252;
+    }
+    .scenario-tabs button:hover:not(.active) {
+      background: #F2ECE4;
+    }
+    .email-frame {
+      background: #F2ECE4;
+      padding: 32px 16px;
+      border-radius: 6px;
+    }
+    .email-inner {
+      max-width: 520px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .email-header {
+      background: #2E5252;
+      padding: 0;
+      text-align: center;
+    }
+    .email-header img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .email-body {
+      padding: 28px 24px;
+      color: #1F2B28;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .email-footer {
+      background: #F2ECE4;
+      padding: 16px 24px;
+      text-align: center;
+      color: #6B6259;
+      font-size: 11px;
+    }
+    .confirmation {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .confirmation .title {
+      font-size: 20px;
+      color: #2E5252;
+      margin: 0 0 8px;
+    }
+    .confirmation .subtitle {
+      color: #6B6259;
+      margin: 0;
+    }
+    .details-box {
+      background: #F2ECE4;
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+    }
+    .details-box .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #2E5252;
+      margin: 0 0 14px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .details-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    .details-table td {
+      padding: 8px 0;
+      vertical-align: top;
+    }
+    .details-table .label {
+      color: #6B6259;
+      width: 100px;
+    }
+    .details-table .value {
+      font-weight: 500;
+    }
+    .payment-paid {
+      color: #2E5252;
+      font-weight: 600;
+    }
+    .payment-due {
+      color: #AE633F;
+      font-weight: 600;
+    }
+    .payment-method {
+      font-size: 12px;
+      color: #6B6259;
+    }
+    .pay-button {
+      display: inline-block;
+      margin-top: 10px;
+      background: #2E5252;
+      color: #C9B36A;
+      text-decoration: none;
+      font-weight: 600;
+      letter-spacing: .5px;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .before-visit {
+      margin-bottom: 24px;
+    }
+    .before-visit .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #2E5252;
+      margin: 0 0 10px;
+    }
+    .before-visit p {
+      margin: 0 0 4px;
+    }
+    .policy-section {
+      margin-bottom: 20px;
+    }
+    .policy-section .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #2E5252;
+      margin: 0 0 10px;
+    }
+    .policy-section .policy-title {
+      margin: 0 0 6px;
+      font-weight: 600;
+    }
+    .policy-section .policy-text {
+      margin: 0 0 14px;
+      color: #6B6259;
+    }
+    .closing {
+      text-align: center;
+      color: #AE633F;
+      font-style: italic;
+      font-size: 15px;
+      margin: 0;
+    }
+    .scenario-description {
+      background: #fff;
+      border-left: 3px solid #C9B36A;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #6B6259;
+    }
+    .scenario-description strong {
+      color: #2E5252;
+    }
+    .divider {
+      border-top: 1px solid #C9B36A;
+      margin: 0 0 20px;
+    }
+    .payment-summary {
+      background: #ffffff;
+      border: 2px solid #C9B36A;
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+    }
+    .payment-summary .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #2E5252;
+      margin: 0 0 14px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .summary-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    .summary-table td {
+      padding: 6px 0;
+    }
+    .summary-table .label {
+      color: #6B6259;
+    }
+    .summary-table .value {
+      font-weight: 500;
+      text-align: right;
+    }
+    .summary-table .total-row td {
+      padding-top: 12px;
+      border-top: 1px solid #C9B36A;
+    }
+    .summary-table .total-label {
+      color: #AE633F;
+      font-weight: 600;
+      font-size: 16px;
+    }
+    .summary-table .total-value {
+      color: #AE633F;
+      font-weight: 700;
+      font-size: 18px;
+      text-align: right;
+    }
+    .summary-table .deposit-value {
+      color: #2E5252;
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-container">
+    <div class="preview-header">
+      📧 EMAIL PREVIEW — STUDIO DAÏ OAKES
+    </div>
+    <div class="scenario-tabs">
+      <button class="active" onclick="showScenario('confirmed')">✅ Confirmada</button>
+      <button onclick="showScenario('pending')">⏳ Quase Confirmada</button>
+      <button onclick="showScenario('remainder')">💳 Pagamento Restante</button>
+    </div>
+
+    <!-- SCENARIO 1: CONFIRMED (Free or Paid) -->
+    <div id="scenario-confirmed" class="email-frame">
+      <div class="scenario-description">
+        <strong>Cenário:</strong> Sessão gratuita (Coffee & Talk) ou sessão já paga.<br/>
+        <strong>Assunto:</strong> "Booking confirmed — Studio Daï Oakes"
+      </div>
+      <div class="email-inner">
+        <div class="email-header">
+          <img src="https://storage.googleapis.com/runable-templates/cli-uploads%2FX3TC6e19boi9erYmQpoYtDoP9hpMpUYH%2F8Gz9FVin3m02-JdU1H8W3%2Femail-header-logo.png" alt="Studio Daï Oakes" />
+        </div>
+        <div class="email-body">
+          <div class="confirmation">
+            <p class="title">✨ Your Appointment is Confirmed</p>
+            <p class="subtitle">We're looking forward to welcoming you.</p>
+          </div>
+
+          <div class="details-box">
+            <p class="section-title">📅 Appointment Details</p>
+            <table class="details-table">
+              <tr>
+                <td class="label">👤 Patient</td>
+                <td class="value">Maria Silva</td>
+              </tr>
+              <tr>
+                <td class="label">🩺 Service</td>
+                <td class="value">Coffee & Talk</td>
+              </tr>
+              <tr>
+                <td class="label">📆 Date</td>
+                <td class="value">Thursday, 31 July 2026</td>
+              </tr>
+              <tr>
+                <td class="label">⏱ Duration</td>
+                <td class="value">30 minutes</td>
+              </tr>
+              <tr>
+                <td class="label">💳 Payment</td>
+                <td>
+                  <span class="payment-paid">Free session — no payment required</span>
+                </td>
+              </tr>
+            </table>
+          </div>
+
+          <div class="before-visit">
+            <p class="section-title">📍 Before Your Visit</p>
+            <p>👟 Please arrive wearing comfortable sportswear.</p>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="policy-section">
+            <p class="section-title">Booking Policy</p>
+            <p class="policy-title">⏰ 24-Hour Notice</p>
+            <p class="policy-text">Reschedule or cancel free of charge up to 24 hours before your session.</p>
+            <p class="policy-title">💳 Deposit Secures Your Slot</p>
+            <p class="policy-text">A €25 deposit (or full payment) confirms your booking.<br/>Late cancellations or missed appointments may result in the deposit being forfeited.</p>
+            <p class="policy-title">🕙 Please Arrive on Time</p>
+            <p class="policy-text">Sessions begin and end on schedule out of respect for every woman's time — yours and the next client's.</p>
+          </div>
+
+          <div class="divider"></div>
+
+          <p class="closing">Obrigada e Namaste 🙏🏼</p>
+        </div>
+        <div class="email-footer">
+          Ommoordsweg 32, 3056 JP Rotterdam · daianeoakes.com
+        </div>
+      </div>
+    </div>
+
+    <!-- SCENARIO 2: ALMOST CONFIRMED (Pending deposit payment) -->
+    <div id="scenario-pending" class="email-frame" style="display:none;">
+      <div class="scenario-description">
+        <strong>Cenário:</strong> Booking criado mas depósito ainda não pago.<br/>
+        <strong>Assunto:</strong> "Booking confirmed — Studio Daï Oakes"<br/>
+        <strong>Ação:</strong> Cliente clica no botão para pagar depósito de €25 via iDEAL.
+      </div>
+      <div class="email-inner">
+        <div class="email-header">
+          <img src="https://storage.googleapis.com/runable-templates/cli-uploads%2FX3TC6e19boi9erYmQpoYtDoP9hpMpUYH%2F8Gz9FVin3m02-JdU1H8W3%2Femail-header-logo.png" alt="Studio Daï Oakes" />
+        </div>
+        <div class="email-body">
+          <div class="confirmation">
+            <p class="title">✨ Your Appointment is Almost Confirmed</p>
+            <p class="subtitle">Pay your deposit to secure your slot.</p>
+          </div>
+
+          <div class="details-box">
+            <p class="section-title">📅 Appointment Details</p>
+            <table class="details-table">
+              <tr>
+                <td class="label">👤 Patient</td>
+                <td class="value">Ana Costa</td>
+              </tr>
+              <tr>
+                <td class="label">🩺 Service</td>
+                <td class="value">Clinical Pilates</td>
+              </tr>
+              <tr>
+                <td class="label">📆 Date</td>
+                <td class="value">Friday, 1 August 2026</td>
+              </tr>
+              <tr>
+                <td class="label">⏱ Duration</td>
+                <td class="value">60 minutes</td>
+              </tr>
+              <tr>
+                <td class="label">💳 Payment</td>
+                <td>
+                  <span class="payment-due">⏳ Deposit due — €25.00</span><br/>
+                  <span class="payment-method">To confirm your booking, please pay your €25 deposit here:</span><br/>
+                  <a href="#" class="pay-button">Pay deposit with iDEAL →</a>
+                </td>
+              </tr>
+            </table>
+          </div>
+
+          <div class="before-visit">
+            <p class="section-title">📍 Before Your Visit</p>
+            <p>👟 Please arrive wearing comfortable sportswear.</p>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="policy-section">
+            <p class="section-title">Booking Policy</p>
+            <p class="policy-title">⏰ 24-Hour Notice</p>
+            <p class="policy-text">Reschedule or cancel free of charge up to 24 hours before your session.</p>
+            <p class="policy-title">💳 Deposit Secures Your Slot</p>
+            <p class="policy-text">A €25 deposit (or full payment) confirms your booking.<br/>Late cancellations or missed appointments may result in the deposit being forfeited.</p>
+            <p class="policy-title">🕙 Please Arrive on Time</p>
+            <p class="policy-text">Sessions begin and end on schedule out of respect for every woman's time — yours and the next client's.</p>
+          </div>
+
+          <div class="divider"></div>
+
+          <p class="closing">Obrigada e Namaste 🙏🏼</p>
+        </div>
+        <div class="email-footer">
+          Ommoordsweg 32, 3056 JP Rotterdam · daianeoakes.com
+        </div>
+      </div>
+    </div>
+
+    <!-- SCENARIO 3: REMAINDER PAYMENT (10 min before session ends) -->
+    <div id="scenario-remainder" class="email-frame" style="display:none;">
+      <div class="scenario-description">
+        <strong>Cenário:</strong> Cliente está no consultório, sessão termina em 10 minutos.<br/>
+        <strong>Assunto:</strong> "Payment reminder — Studio Daï Oakes"<br/>
+        <strong>Ação:</strong> Cliente paga o valor restante via iDEAL enquanto termina a sessão.
+      </div>
+      <div class="email-inner">
+        <div class="email-header">
+          <img src="https://storage.googleapis.com/runable-templates/cli-uploads%2FX3TC6e19boi9erYmQpoYtDoP9hpMpUYH%2F8Gz9FVin3m02-JdU1H8W3%2Femail-header-logo.png" alt="Studio Daï Oakes" />
+        </div>
+        <div class="email-body">
+          <div class="confirmation">
+            <p class="title">💳 Payment Reminder</p>
+            <p class="subtitle">Your session is about to end. Please complete your payment.</p>
+          </div>
+
+          <div class="details-box">
+            <p class="section-title">📅 Session Details</p>
+            <table class="details-table">
+              <tr>
+                <td class="label">👤 Patient</td>
+                <td class="value">Sofia Mendes</td>
+              </tr>
+              <tr>
+                <td class="label">🩺 Service</td>
+                <td class="value">Daï Massage — 90 min</td>
+              </tr>
+              <tr>
+                <td class="label">📆 Date</td>
+                <td class="value">Monday, 4 August 2026</td>
+              </tr>
+              <tr>
+                <td class="label">⏰ Time</td>
+                <td class="value">10:00</td>
+              </tr>
+            </table>
+          </div>
+
+          <div class="payment-summary">
+            <p class="section-title">💶 Payment Summary</p>
+            <table class="summary-table">
+              <tr>
+                <td class="label">Session total</td>
+                <td class="value">€95.00</td>
+              </tr>
+              <tr>
+                <td class="label">Deposit paid</td>
+                <td class="value deposit-value">- €25.00</td>
+              </tr>
+              <tr class="total-row">
+                <td class="total-label">Amount due</td>
+                <td class="total-value">€70.00</td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="text-align:center;margin-bottom:24px;">
+            <p style="color:#6B6259;margin:0 0 12px;font-size:13px;">Please pay the remaining amount now:</p>
+            <a href="#" class="pay-button">Pay €70.00 with iDEAL →</a>
+          </div>
+
+          <div class="divider"></div>
+
+          <p class="closing">Obrigada e Namaste 🙏🏼</p>
+        </div>
+        <div class="email-footer">
+          Ommoordsweg 32, 3056 JP Rotterdam · daianeoakes.com
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function showScenario(scenario) {
+      document.querySelectorAll('[id^="scenario-"]').forEach(el => el.style.display = 'none');
+      document.getElementById('scenario-' + scenario).style.display = 'block';
+      document.querySelectorAll('.scenario-tabs button').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+  </script>
+</body>
+</html>

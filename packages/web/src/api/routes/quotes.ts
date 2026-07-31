@@ -111,6 +111,41 @@ export const quotesRoute = new Hono()
 
     return c.json({ invoice }, 201);
   })
+  .put("/:id/edit", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const body = await c.req.json();
+    const { lineItems, subtotal, vatTotal, total } = computeTotals(body.items);
+    
+    const [quote] = await db
+      .update(quotes)
+      .set({
+        clientId: body.clientId,
+        validUntil: body.validUntil ? new Date(body.validUntil) : null,
+        notes: body.notes ?? null,
+        subtotal,
+        vatTotal,
+        total,
+      })
+      .where(eq(quotes.id, id))
+      .returning();
+
+    if (!quote) return c.json({ message: "Not found" }, 404);
+
+    // Remove old items and insert new ones
+    await db.delete(quoteItems).where(eq(quoteItems.quoteId, id));
+    for (const item of lineItems) {
+      await db.insert(quoteItems).values({
+        quoteId: quote!.id,
+        serviceId: item.serviceId ?? null,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        vatRate: item.vatRate,
+        amount: item.amount,
+      });
+    }
+    return c.json({ quote }, 200);
+  })
   .delete("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
     await db.delete(quoteItems).where(eq(quoteItems.quoteId, id));

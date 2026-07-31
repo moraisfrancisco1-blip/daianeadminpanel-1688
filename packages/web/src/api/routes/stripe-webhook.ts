@@ -3,8 +3,14 @@ import Stripe from "stripe";
 import { stripe } from "../services/stripe";
 import { syncStripeCustomerToLocal, findClientByStripeCustomerId, syncStripeInvoiceStatus, findInvoiceByStripeInvoiceId } from "../services/stripe-sync";
 import { db } from "../database";
-import { clients, invoices } from "../database/schema";
+import { clients, invoices, bookings, services, invoiceItems } from "../database/schema";
 import { eq } from "drizzle-orm";
+import { nextNumber } from "../lib/counters";
+import { buildBookingConfirmationHtml, buildAdminNewBookingHtml } from "../lib/email-templates";
+import { sendEmail } from "../services/email";
+import { COMPANY } from "../lib/company";
+import { createCalendarEvent } from "../services/google-calendar";
+import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 
 export const stripeWebhookRoute = new Hono();
 
@@ -83,7 +89,6 @@ stripeWebhookRoute.post("/", async (c) => {
         console.log("[stripe-webhook] Customer deleted:", customer.id);
         const localClient = await findClientByStripeCustomerId(customer.id);
         if (localClient) {
-          // Remove stripeCustomerId from local client but keep the client record
           await db
             .update(clients)
             .set({ stripeCustomerId: null })
@@ -97,7 +102,6 @@ stripeWebhookRoute.post("/", async (c) => {
       case "invoice.created": {
         const invoice = event.data.object as Stripe.Invoice;
         console.log("[stripe-webhook] Invoice created:", invoice.id);
-        // Invoice creation is handled by the admin panel, no action needed
         break;
       }
 
@@ -105,7 +109,6 @@ stripeWebhookRoute.post("/", async (c) => {
         const invoice = event.data.object as Stripe.Invoice;
         const invoiceData = invoice as unknown as { id: string; status?: string; paid_at?: number };
         console.log("[stripe-webhook] Invoice updated:", invoiceData.id);
-        // Sync invoice status from Stripe to local database
         await syncStripeInvoiceStatus(
           invoiceData.id,
           invoiceData.status ?? "draft",
@@ -137,7 +140,6 @@ stripeWebhookRoute.post("/", async (c) => {
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
         console.log("[stripe-webhook] Invoice payment failed:", invoice.id);
-        // Keep status as "sent" but log the failure
         break;
       }
 
@@ -153,12 +155,136 @@ stripeWebhookRoute.post("/", async (c) => {
         console.log("[stripe-webhook] Invoice deleted:", invoice.id);
         const localInvoice = await findInvoiceByStripeInvoiceId(invoice.id);
         if (localInvoice) {
-          // Remove stripeInvoiceId from local invoice but keep the record
           await db
             .update(invoices)
             .set({ stripeInvoiceId: null, stripePaymentIntentId: null })
             .where(eq(invoices.id, localInvoice.id));
         }
+        break;
+      }
+
+      // ==================== CHECKOUT / BOOKING EVENT ====================
+
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        console.log("[stripe-webhook] Checkout session completed:", session.id);
+
+        const bookingId = session.metadata?.bookingId ? Number(session.metadata.bookingId) : null;
+        if (!bookingId) {
+          console.log("[stripe-webhook] No bookingId in session metadata, skipping");
+          break;
+        }
+
+        const [booking] = await db.select().from(bookings).where(eq(bookings.id, bookingId));
+        if (!booking) {
+          console.log("[stripe-webhook] Booking not found:", bookingId);
+          break;
+        }
+
+        // Confirm booking
+        await db.update(bookings).set({ status: "confirmed", depositStatus: "paid" }).where(eq(bookings.id, bookingId));
+
+        // Find or create client
+        let [client] = await db.select().from(clients).where(eq(clients.email, booking.email));
+        if (!client) {
+          [client] = await db.insert(clients).values({ name: booking.name, email: booking.email, phone: booking.phone }).returning();
+        }
+
+        // Update booking with clientId
+        await db.update(bookings).set({ clientId: client!.id }).where(eq(bookings.id, bookingId));
+
+        // Create invoice
+        const [service] = await db.select().from(services).where(eq(services.id, booking.serviceId));
+        const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
+        const issueDate = new Date();
+        const dueDate = new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+        const amount = booking.depositAmount;
+        const vatRate = service?.vatRate ?? 0.09;
+        const base = Number((amount / (1 + vatRate)).toFixed(2));
+        const vat = Number((amount - base).toFixed(2));
+
+        const [invoice] = await db.insert(invoices).values({
+          invoiceNumber,
+          clientId: client!.id,
+          bookingId: booking.id,
+          status: "paid",
+          issueDate,
+          dueDate,
+          notes: booking.payFullNow ? "Paid in full at booking." : "Booking deposit — remainder due at session.",
+          subtotal: base,
+          vatTotal: vat,
+          total: amount,
+          paidAt: new Date(),
+        }).returning();
+
+        await db.insert(invoiceItems).values({
+          invoiceId: invoice!.id,
+          description: booking.payFullNow ? `${service?.name ?? "Session"} — full payment` : `${service?.name ?? "Session"} — booking deposit`,
+          quantity: 1,
+          unitPrice: amount,
+          vatRate,
+          amount,
+        });
+
+        // Send confirmation emails
+        await sendEmail({
+          to: booking.email,
+          subject: "Booking confirmed — Studio Daï Oakes",
+          html: buildBookingConfirmationHtml({
+            name: booking.name,
+            serviceName: service?.name ?? "Session",
+            date: booking.date,
+            startTime: booking.startTime,
+            payFullNow: booking.payFullNow,
+          }),
+        });
+
+        await sendEmail({
+          to: COMPANY.adminEmail,
+          subject: `New booking — ${booking.name} (${service?.name ?? "Session"})`,
+          html: buildAdminNewBookingHtml({
+            clientName: booking.name,
+            clientEmail: booking.email,
+            clientPhone: booking.phone,
+            serviceName: service?.name ?? "Session",
+            date: booking.date,
+            startTime: booking.startTime,
+            amount: booking.depositAmount,
+            payFullNow: booking.payFullNow,
+          }),
+        });
+
+        // Sync to Google Calendar
+        try {
+          const eventId = await createCalendarEvent({
+            bookingId: booking.id,
+            summary: `${service?.name ?? "Session"} — ${booking.name}`,
+            description: `Nome: ${booking.name}\nServiço: ${service?.name ?? "Session"}\nTelefone: ${booking.phone ?? "—"}`,
+            date: booking.date,
+            startTime: booking.startTime,
+            durationMinutes: service?.durationMinutes ?? 60,
+            attendeeEmail: booking.email,
+          });
+          if (eventId) {
+            await db.update(bookings).set({ googleEventId: eventId }).where(eq(bookings.id, bookingId));
+          }
+        } catch (err) {
+          console.error("[stripe-webhook] Failed to sync booking to Google Calendar", err);
+        }
+
+        // WhatsApp notification
+        await sendAdminWhatsApp(
+          buildBookingWhatsAppMessage({
+            clientName: booking.name,
+            clientPhone: booking.phone,
+            serviceName: service?.name ?? "Session",
+            date: booking.date,
+            startTime: booking.startTime,
+            amount: booking.depositAmount,
+            payFullNow: booking.payFullNow,
+          }),
+        );
+
         break;
       }
 

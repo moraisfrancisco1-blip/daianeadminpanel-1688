@@ -262,6 +262,46 @@ export const invoicesRoute = new Hono()
     await db.update(invoices).set({ status: "sent" }).where(eq(invoices.id, id));
     return c.json({ success: true }, 200);
   })
+  .put("/:id/edit", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const body = await c.req.json();
+    const { lineItems, subtotal, vatTotal, total } = computeTotals(body.items);
+
+    const [invoice] = await db
+      .update(invoices)
+      .set({
+        invoiceNumber: body.invoiceNumber,
+        clientId: body.clientId,
+        status: body.status,
+        issueDate: body.issueDate ? new Date(body.issueDate) : undefined,
+        dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
+        notes: body.notes ?? null,
+        subtotal,
+        vatTotal,
+        total,
+        paidAt: body.status === "paid" ? (body.paidAt ? new Date(body.paidAt) : new Date()) : null,
+      })
+      .where(eq(invoices.id, id))
+      .returning();
+
+    if (!invoice) return c.json({ message: "Not found" }, 404);
+
+    // Replace items
+    await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, id));
+    for (const item of lineItems) {
+      await db.insert(invoiceItems).values({
+        invoiceId: invoice!.id,
+        serviceId: item.serviceId ?? null,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        vatRate: item.vatRate,
+        amount: item.amount,
+      });
+    }
+
+    return c.json({ invoice }, 200);
+  })
   .delete("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
     

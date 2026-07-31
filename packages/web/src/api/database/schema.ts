@@ -137,6 +137,7 @@ export const bookings = sqliteTable("bookings", {
   postSessionEmailSentAt: integer("post_session_email_sent_at", { mode: "timestamp" }), // review/promo email sent
   reminder2dSentAt: integer("reminder_2d_sent_at", { mode: "timestamp" }), // "session in 2 days" reminder sent
   reminder1dSentAt: integer("reminder_1d_sent_at", { mode: "timestamp" }), // "session tomorrow" reminder sent
+  remainderEmailSentAt: integer("remainder_email_sent_at", { mode: "timestamp" }), // "pay remainder" email sent (10 min before end)
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
