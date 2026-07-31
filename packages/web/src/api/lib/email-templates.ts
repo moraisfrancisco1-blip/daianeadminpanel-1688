@@ -100,6 +100,7 @@ export function buildBookingConfirmationHtml(opts: {
         <tr><td style="padding:6px 0;color:#6B6259;width:100px;vertical-align:top;">👤 Patient</td><td style="padding:6px 0;font-weight:500;">${opts.name}</td></tr>
         <tr><td style="padding:6px 0;color:#6B6259;vertical-align:top;">🩺 Service</td><td style="padding:6px 0;font-weight:500;">${opts.serviceName}</td></tr>
         <tr><td style="padding:6px 0;color:#6B6259;vertical-align:top;">📆 Date</td><td style="padding:6px 0;font-weight:500;">${formattedDate}</td></tr>
+        <tr><td style="padding:6px 0;color:#6B6259;vertical-align:top;">⏰ Time</td><td style="padding:6px 0;font-weight:500;">${opts.startTime}</td></tr>
         <tr><td style="padding:6px 0;color:#6B6259;vertical-align:top;">⏱ Duration</td><td style="padding:6px 0;font-weight:500;">${opts.durationMinutes} minutes</td></tr>
         <tr><td style="padding:6px 0;color:#6B6259;vertical-align:top;">💳 Payment</td><td style="padding:6px 0;">${paymentInfo}</td></tr>
       </table>
