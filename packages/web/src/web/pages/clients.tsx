@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
-import { Plus, Search, Mail, Phone, X } from "lucide-react";
+import { Plus, Search, Mail, Phone, X, Pencil } from "lucide-react";
 
 export default function ClientsPage() {
   return (
@@ -16,6 +16,7 @@ export default function ClientsPage() {
 function ClientsContent() {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [editingClient, setEditingClient] = useState<any>(null);
   const qc = useQueryClient();
 
   const clients = useQuery({
@@ -31,7 +32,24 @@ function ClientsContent() {
     },
   });
 
-  const filtered = (clients.data?.clients ?? []).filter((c) =>
+  const updateClient = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: any }) => {
+      const res = await fetch(`/api/clients/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update client");
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["clients"] });
+      setEditingClient(null);
+    },
+  });
+
+  const clientList = clients.data && "clients" in clients.data ? clients.data.clients : [];
+  const filtered = clientList.filter((c) =>
     [c.name, c.email, c.phone].filter(Boolean).some((v) => v!.toLowerCase().includes(search.toLowerCase())),
   );
 
@@ -40,7 +58,7 @@ function ClientsContent() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-display text-3xl font-semibold">Clients</h1>
-          <p className="text-muted-foreground mt-1">{clients.data?.clients.length ?? 0} clients</p>
+          <p className="text-muted-foreground mt-1">{clientList.length} clients</p>
         </div>
         <Button onClick={() => setShowForm(true)}>
           <Plus className="size-4" /> Add client
@@ -73,6 +91,7 @@ function ClientsContent() {
                 <th className="px-4 py-3 font-medium">Contact</th>
                 <th className="px-4 py-3 font-medium">City</th>
                 <th className="px-4 py-3 font-medium">Country</th>
+                <th className="px-4 py-3 font-medium w-12"></th>
               </tr>
             </thead>
             <tbody>
@@ -95,11 +114,16 @@ function ClientsContent() {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{c.city ?? "—"}</td>
                   <td className="px-4 py-3 text-muted-foreground">{c.country ?? "—"}</td>
+                  <td className="px-4 py-3">
+                    <Button variant="ghost" size="icon-sm" onClick={() => setEditingClient(c)}>
+                      <Pencil className="size-4" />
+                    </Button>
+                  </td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                     No clients found.
                   </td>
                 </tr>
@@ -142,6 +166,51 @@ function ClientsContent() {
               </div>
               <Button type="submit" className="w-full" disabled={createClient.isPending}>
                 {createClient.isPending ? "Saving…" : "Save client"}
+              </Button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {editingClient && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-xl p-6 w-full max-w-md space-y-4 relative">
+            <button onClick={() => setEditingClient(null)} className="absolute top-4 right-4 text-muted-foreground">
+              <X className="size-4" />
+            </button>
+            <h2 className="font-display text-xl font-semibold">Edit client</h2>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const fd = new FormData(e.currentTarget);
+                updateClient.mutate({
+                  id: editingClient.id,
+                  data: {
+                    name: fd.get("name"),
+                    email: fd.get("email"),
+                    phone: fd.get("phone"),
+                    address: fd.get("address"),
+                    zipCode: fd.get("zipCode"),
+                    city: fd.get("city"),
+                    country: fd.get("country"),
+                    notes: fd.get("notes"),
+                  },
+                });
+              }}
+              className="space-y-3"
+            >
+              <input name="name" required placeholder="Name" defaultValue={editingClient.name} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <input name="email" type="email" placeholder="Email" defaultValue={editingClient.email ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <input name="phone" placeholder="Phone" defaultValue={editingClient.phone ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <input name="address" placeholder="Address (Morada)" defaultValue={editingClient.address ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <input name="zipCode" placeholder="Zip Code" defaultValue={editingClient.zipCode ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <div className="grid grid-cols-2 gap-3">
+                <input name="city" placeholder="City" defaultValue={editingClient.city ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+                <input name="country" placeholder="Country" defaultValue={editingClient.country ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              </div>
+              <textarea name="notes" placeholder="Notes" defaultValue={editingClient.notes ?? ""} rows={3} className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm resize-none" />
+              <Button type="submit" className="w-full" disabled={updateClient.isPending}>
+                {updateClient.isPending ? "Saving…" : "Save changes"}
               </Button>
             </form>
           </div>
