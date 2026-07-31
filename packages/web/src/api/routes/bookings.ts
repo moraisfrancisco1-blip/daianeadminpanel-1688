@@ -8,7 +8,7 @@ import { sendEmail } from "../services/email";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildRemainderPaymentEmailHtml } from "../lib/email-templates";
 import { nextNumber } from "../lib/counters";
 import { COMPANY } from "../lib/company";
-import { createCalendarEvent, getGoogleBusyIntervals } from "../services/google-calendar";
+import { createCalendarEvent, getGoogleBusyIntervals, deleteCalendarEvent, updateCalendarEvent } from "../services/google-calendar";
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 
 const WORK_DAYS = [1, 3, 5]; // Mon, Wed, Fri
@@ -382,7 +382,29 @@ export const bookingsRoute = new Hono()
   .put("/:id/status", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
     const { status } = await c.req.json();
+    
+    // Get the booking before updating to check for Google Calendar sync
+    const [existingBooking] = await db.select().from(bookings).where(eq(bookings.id, id));
+    
     const [booking] = await db.update(bookings).set({ status }).where(eq(bookings.id, id)).returning();
+    
+    // Sync with Google Calendar
+    if (existingBooking && booking) {
+      const [service] = await db.select().from(services).where(eq(services.id, booking.serviceId));
+      const serviceName = service?.name ?? "Session";
+      const durationMinutes = service?.durationMinutes ?? 60;
+      
+      // If status changed to cancelled, delete the calendar event
+      if (status === "cancelled" && existingBooking.googleEventId) {
+        await deleteCalendarEvent(existingBooking.googleEventId);
+        await db.update(bookings).set({ googleEventId: null }).where(eq(bookings.id, id));
+      }
+      // If status changed to confirmed and there's no calendar event yet, create one
+      else if (status === "confirmed" && !existingBooking.googleEventId && existingBooking.status !== "confirmed") {
+        await syncBookingToGoogleCalendar(booking, serviceName, durationMinutes);
+      }
+    }
+    
     return c.json({ booking }, 200);
   })
   // Admin: send remainder payment email (10 min before session ends)
@@ -472,6 +494,15 @@ export const bookingsRoute = new Hono()
   })
   .delete("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
+    
+    // Get the booking before deleting to check for Google Calendar sync
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, id));
+    
+    // Delete from Google Calendar if there's an event
+    if (booking?.googleEventId) {
+      await deleteCalendarEvent(booking.googleEventId);
+    }
+    
     await db.delete(bookings).where(eq(bookings.id, id));
     return c.json({ success: true }, 200);
   })

@@ -278,3 +278,92 @@ export async function createCalendarEvent(params: {
   const data = (await res.json()) as { id: string };
   return data.id;
 }
+
+/**
+ * Deletes a Google Calendar event by its event ID.
+ * No-ops silently if Google Calendar isn't connected or the event doesn't exist.
+ */
+export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
+  const token = await getValidAccessToken();
+  if (!token) return false;
+  const calendarId = await getSelectedCalendarId();
+
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+    if (!res.ok) {
+      console.error("[google-calendar] deleteEvent failed", await res.text());
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[google-calendar] deleteEvent error", err);
+    return false;
+  }
+}
+
+/**
+ * Updates a Google Calendar event with new details.
+ * No-ops silently if Google Calendar isn't connected or the event doesn't exist.
+ */
+export async function updateCalendarEvent(params: {
+  eventId: string;
+  summary: string;
+  description: string;
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:MM
+  durationMinutes: number;
+  attendeeEmail: string;
+}): Promise<boolean> {
+  const token = await getValidAccessToken();
+  if (!token) return false;
+  const calendarId = await getSelectedCalendarId();
+
+  const startDateTime = `${params.date}T${params.startTime}:00`;
+  const [h, m] = params.startTime.split(":").map(Number);
+  const endTotal = h! * 60 + m! + params.durationMinutes;
+  const endTime = `${String(Math.floor(endTotal / 60)).padStart(2, "0")}:${String(endTotal % 60).padStart(2, "0")}`;
+  const endDateTime = `${params.date}T${endTime}:00`;
+
+  // Build attendees list: patient + Daiane (if patient email is different from Daiane's)
+  const attendees: { email: string }[] = [{ email: params.attendeeEmail }];
+  if (params.attendeeEmail.toLowerCase() !== DAINE_EMAIL.toLowerCase()) {
+    attendees.push({ email: DAINE_EMAIL });
+  }
+
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(params.eventId)}?sendUpdates=all`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          summary: params.summary,
+          description: params.description,
+          start: { dateTime: startDateTime, timeZone: TZ },
+          end: { dateTime: endDateTime, timeZone: TZ },
+          attendees,
+          reminders: { useDefault: true },
+        }),
+      },
+    );
+    if (!res.ok) {
+      console.error("[google-calendar] updateEvent failed", await res.text());
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[google-calendar] updateEvent error", err);
+    return false;
+  }
+}
