@@ -13,6 +13,7 @@ import {
   UserPlus,
   Bell,
   Sparkles,
+  CreditCard,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
 import { useState } from "react";
@@ -60,6 +61,11 @@ function DashboardContent() {
   const overdue = useQuery({
     queryKey: ["overdue"],
     queryFn: async () => (await api.reminders.overdue.$get()).json(),
+  });
+  const stripeCommissions = useQuery({
+    queryKey: ["dashboard-stripe-commissions"],
+    queryFn: async () => (await api.dashboard["stripe-commissions"].$get()).json(),
+    refetchInterval: 60000, // refresh every 60s for real-time feel
   });
 
   // best-effort trigger of overdue reminder check on load (fallback automation)
@@ -176,6 +182,38 @@ function DashboardContent() {
           )}
         </div>
       </div>
+
+      {/* Stripe commissions */}
+      {stripeCommissions.data && stripeCommissions.data.available !== false && (
+        <div className="bg-card border border-border rounded-xl p-6">
+          <h3 className="font-medium mb-4 flex items-center gap-2">
+            <CreditCard className="size-4 text-brand-copper" /> Stripe Commissions — this month
+            <span className="ml-auto text-xs text-muted-foreground">Auto-refreshes every 60s</span>
+          </h3>
+          {stripeCommissions.isLoading ? (
+            <div className="h-20 bg-muted rounded animate-pulse" />
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Gross revenue</p>
+                <p className="text-xl font-display font-semibold">€{(stripeCommissions.data.totalGross ?? 0).toFixed(2)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Stripe fees</p>
+                <p className="text-xl font-display font-semibold text-destructive">€{(stripeCommissions.data.totalFees ?? 0).toFixed(2)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Net received</p>
+                <p className="text-xl font-display font-semibold text-[#4C7A56]">€{(stripeCommissions.data.totalNet ?? 0).toFixed(2)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Transactions</p>
+                <p className="text-xl font-display font-semibold">{stripeCommissions.data.transactionCount ?? 0}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Service breakdown + Top clients */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

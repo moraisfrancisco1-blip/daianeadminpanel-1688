@@ -3,6 +3,8 @@ import { db } from "../database";
 import { invoices, clients, bookings, invoiceItems, services, payments } from "../database/schema";
 import { requireAuth } from "../middleware/auth";
 import { eq } from "drizzle-orm";
+import { stripe } from "../services/stripe";
+import Stripe from "stripe";
 
 export const dashboardRoute = new Hono()
   .get("/stats", requireAuth, async (c) => {
@@ -199,4 +201,61 @@ export const dashboardRoute = new Hono()
 
     events.sort((a, b) => b.date.getTime() - a.date.getTime());
     return c.json({ events: events.slice(0, limit) }, 200);
+  })
+  .get("/stripe-commissions", requireAuth, async (c) => {
+    if (!stripe) {
+      return c.json({ available: false, message: "Stripe not configured" }, 200);
+    }
+
+    const year = Number(c.req.query("year") ?? new Date().getFullYear());
+    const month = Number(c.req.query("month") ?? new Date().getMonth() + 1);
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 1);
+
+    const startTimestamp = Math.floor(start.getTime() / 1000);
+    const endTimestamp = Math.floor(end.getTime() / 1000);
+
+    let totalFees = 0;
+    let totalGross = 0;
+    let totalNet = 0;
+    let transactionCount = 0;
+    let hasMore = true;
+    let startingAfter: string | undefined;
+
+    while (hasMore) {
+      const params: Stripe.BalanceTransactionListParams = {
+        limit: 100,
+        created: { gte: startTimestamp, lt: endTimestamp },
+        type: "charge",
+      };
+      if (startingAfter) params.starting_after = startingAfter;
+
+      const transactions = await stripe.balanceTransactions.list(params);
+
+      for (const tx of transactions.data) {
+        totalFees += tx.fee;
+        totalGross += tx.amount;
+        totalNet += tx.net;
+        transactionCount++;
+      }
+
+      hasMore = transactions.has_more;
+      const lastTx = transactions.data[transactions.data.length - 1];
+      if (lastTx) {
+        startingAfter = lastTx.id;
+      }
+    }
+
+    return c.json(
+      {
+        available: true,
+        year,
+        month,
+        totalFees: Number((totalFees / 100).toFixed(2)),
+        totalGross: Number((totalGross / 100).toFixed(2)),
+        totalNet: Number((totalNet / 100).toFixed(2)),
+        transactionCount,
+      },
+      200,
+    );
   });
