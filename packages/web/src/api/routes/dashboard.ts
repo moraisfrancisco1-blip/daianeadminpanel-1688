@@ -4,7 +4,6 @@ import { invoices, clients, bookings, invoiceItems, services, payments } from ".
 import { requireAuth } from "../middleware/auth";
 import { eq } from "drizzle-orm";
 import { stripe } from "../services/stripe";
-import Stripe from "stripe";
 
 export const dashboardRoute = new Hono()
   .get("/stats", requireAuth, async (c) => {
@@ -223,14 +222,14 @@ export const dashboardRoute = new Hono()
     let startingAfter: string | undefined;
 
     while (hasMore) {
-      const params: Stripe.BalanceTransactionListParams = {
+      const params: Record<string, unknown> = {
         limit: 100,
         created: { gte: startTimestamp, lt: endTimestamp },
         type: "charge",
       };
       if (startingAfter) params.starting_after = startingAfter;
 
-      const transactions = await stripe.balanceTransactions.list(params);
+      const transactions = await stripe.balanceTransactions.list(params as Parameters<typeof stripe.balanceTransactions.list>[0]);
 
       for (const tx of transactions.data) {
         totalFees += tx.fee;
