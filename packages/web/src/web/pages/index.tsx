@@ -9,7 +9,6 @@ import {
   AlertTriangle,
   CalendarClock,
   Plus,
-  FileText,
   UserPlus,
   Bell,
   Sparkles,
@@ -41,39 +40,39 @@ function DashboardContent() {
 
   const stats = useQuery({
     queryKey: ["dashboard-stats"],
-    queryFn: async () => (await api.dashboard.stats.$get()).json(),
+    queryFn: async (): Promise<any> => (await api.dashboard.stats.$get()).json(),
   });
   const revenueChart = useQuery({
     queryKey: ["dashboard-revenue-chart"],
-    queryFn: async () => (await api.dashboard["revenue-chart"].$get({ query: { months: "6" } })).json(),
+    queryFn: async (): Promise<any> => (await api.dashboard["revenue-chart"].$get({ query: { months: "6" } })).json(),
   });
   const serviceBreakdown = useQuery({
     queryKey: ["dashboard-service-breakdown"],
-    queryFn: async () => (await api.dashboard["service-breakdown"].$get()).json(),
+    queryFn: async (): Promise<any> => (await api.dashboard["service-breakdown"].$get()).json(),
   });
   const topClients = useQuery({
     queryKey: ["dashboard-top-clients"],
-    queryFn: async () => (await api.dashboard["top-clients"].$get({ query: { limit: "5" } })).json(),
+    queryFn: async (): Promise<any> => (await api.dashboard["top-clients"].$get({ query: { limit: "5" } })).json(),
   });
   const upcomingBookings = useQuery({
     queryKey: ["dashboard-upcoming"],
-    queryFn: async () => (await api.dashboard["upcoming-bookings"].$get({ query: { limit: "6" } })).json(),
+    queryFn: async (): Promise<any> => (await api.dashboard["upcoming-bookings"].$get({ query: { limit: "6" } })).json(),
   });
   const vatSummary = useQuery({
     queryKey: ["dashboard-vat", activeMonth.year, activeMonth.month],
-    queryFn: async () => (await api.dashboard["vat-summary"].$get({ query: { year: String(activeMonth.year), month: String(activeMonth.month) } })).json(),
+    queryFn: async (): Promise<any> => (await api.dashboard["vat-summary"].$get({ query: { year: String(activeMonth.year), month: String(activeMonth.month) } })).json(),
   });
   const activityFeed = useQuery({
     queryKey: ["dashboard-activity"],
-    queryFn: async () => (await api.dashboard["activity-feed"].$get({ query: { limit: "10" } })).json(),
+    queryFn: async (): Promise<any> => (await api.dashboard["activity-feed"].$get({ query: { limit: "10" } })).json(),
   });
   const overdue = useQuery({
     queryKey: ["overdue"],
-    queryFn: async () => (await api.reminders.overdue.$get()).json(),
+    queryFn: async (): Promise<any> => (await api.reminders.overdue.$get()).json(),
   });
   const stripeCommissions = useQuery({
     queryKey: ["dashboard-stripe-commissions", activeMonth.year, activeMonth.month],
-    queryFn: async () => (await api.dashboard["stripe-commissions"].$get({ query: { year: String(activeMonth.year), month: String(activeMonth.month) } })).json(),
+    queryFn: async (): Promise<any> => (await api.dashboard["stripe-commissions"].$get({ query: { year: String(activeMonth.year), month: String(activeMonth.month) } })).json(),
     refetchInterval: 60000,
   });
 
@@ -174,7 +173,7 @@ function DashboardContent() {
                 <XAxis dataKey="label" tick={{ fontSize: 12, fill: "#6B6259" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 12, fill: "#6B6259" }} axisLine={false} tickLine={false} />
                 <Tooltip
-                  formatter={(v: number) => [`€${v.toFixed(2)}`, "Revenue"]}
+                  formatter={(v: any) => [`€${Number(v).toFixed(2)}`, "Revenue"]}
                   contentStyle={{ borderRadius: 8, borderColor: "#EBDFCF", fontSize: 12 }}
                   cursor={{ fill: "rgba(174,99,63,0.1)" }}
                 />
@@ -202,7 +201,7 @@ function DashboardContent() {
             <div className="h-40 bg-muted rounded animate-pulse" />
           ) : (
             <div className="space-y-3">
-              {(vatSummary.data?.breakdown ?? []).map((b) => (
+              {(vatSummary.data?.breakdown ?? []).map((b: any) => (
                 <div key={b.rate} className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">VAT {Math.round(b.rate * 100)}%</span>
                   <span className="font-medium">€{b.vat.toFixed(2)}</span>
@@ -260,7 +259,7 @@ function DashboardContent() {
             <div className="h-40 bg-muted rounded animate-pulse" />
           ) : (
             <div className="space-y-3">
-              {(serviceBreakdown.data?.breakdown ?? []).slice(0, 6).map((s) => (
+              {(serviceBreakdown.data?.breakdown ?? []).slice(0, 6).map((s: any) => (
                 <div key={s.name} className="flex items-center justify-between text-sm">
                   <div>
                     <p className="font-medium">{s.name}</p>
@@ -282,7 +281,7 @@ function DashboardContent() {
             <div className="h-40 bg-muted rounded animate-pulse" />
           ) : (
             <div className="space-y-3">
-              {(topClients.data?.topClients ?? []).map((tc, i) => (
+              {(topClients.data?.topClients ?? []).map((tc: any, i: number) => (
                 <div key={tc.clientId} className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
                     <span className="size-5 rounded-full bg-brand-teal text-white text-[10px] flex items-center justify-center font-medium">
@@ -314,7 +313,7 @@ function DashboardContent() {
             <div className="h-40 bg-muted rounded animate-pulse" />
           ) : (
             <div className="space-y-3">
-              {(upcomingBookings.data?.upcoming ?? []).map((b) => (
+              {(upcomingBookings.data?.upcoming ?? []).map((b: any) => (
                 <div key={b.id} className="text-sm">
                   <p className="font-medium">{b.name}</p>
                   <p className="text-xs text-muted-foreground">
@@ -337,7 +336,7 @@ function DashboardContent() {
             <div className="h-40 bg-muted rounded animate-pulse" />
           ) : (
             <div className="space-y-3">
-              {(overdue.data?.overdue ?? []).slice(0, 6).map((inv) => (
+              {(overdue.data?.overdue ?? []).slice(0, 6).map((inv: any) => (
                 <div key={inv.id} className="flex items-center justify-between text-sm gap-2">
                   <div>
                     <p className="font-medium">{inv.invoiceNumber}</p>
@@ -367,7 +366,7 @@ function DashboardContent() {
             <div className="h-40 bg-muted rounded animate-pulse" />
           ) : (
             <div className="space-y-3 max-h-64 overflow-y-auto">
-              {(activityFeed.data?.events ?? []).map((e, i) => (
+              {(activityFeed.data?.events ?? []).map((e: any, i: number) => (
                 <div key={i} className="text-xs">
                   <p className="text-muted-foreground">{new Date(e.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</p>
                   <p>{e.text}</p>

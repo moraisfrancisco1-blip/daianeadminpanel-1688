@@ -22,7 +22,7 @@ function ClientsContent() {
 
   const clients = useQuery({
     queryKey: ["clients"],
-    queryFn: async () => (await api.clients.$get()).json(),
+    queryFn: async (): Promise<any> => (await api.clients.$get()).json(),
   });
 
   const createClient = useMutation({
@@ -62,7 +62,7 @@ function ClientsContent() {
   });
 
   const clientList = clients.data && "clients" in clients.data ? clients.data.clients : [];
-  const filtered = clientList.filter((c) =>
+  const filtered = clientList.filter((c: any) =>
     [c.name, c.email, c.phone].filter(Boolean).some((v) => v!.toLowerCase().includes(search.toLowerCase())),
   );
 
@@ -108,7 +108,7 @@ function ClientsContent() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c) => (
+              {filtered.map((c: any) => (
                 <tr key={c.id} className="border-t border-border hover:bg-accent/40 transition-colors">
                   <td className="px-4 py-3 font-medium">{c.name}</td>
                   <td className="px-4 py-3 text-muted-foreground">
