@@ -14,6 +14,7 @@ import {
   Bell,
   Sparkles,
   CreditCard,
+  Euro,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
 import { useState } from "react";
@@ -133,8 +134,13 @@ function DashboardContent() {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <StatCard icon={Users} label="Total clients" value={stats.data?.totalClients ?? 0} />
+          <StatCard
+            icon={Euro}
+            label="Total revenue"
+            value={`€${(stats.data?.totalRevenue ?? 0).toFixed(2)}`}
+          />
           <StatCard
             icon={TrendingUp}
             label="Revenue this month"
