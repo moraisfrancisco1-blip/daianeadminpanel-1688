@@ -138,7 +138,7 @@ function DashboardContent() {
           <StatCard icon={Users} label="Total clients" value={stats.data?.totalClients ?? 0} />
           <StatCard
             icon={Euro}
-            label="Total revenue"
+            label="Total revenue (net)"
             value={`€${(stats.data?.totalRevenue ?? 0).toFixed(2)}`}
           />
           <StatCard

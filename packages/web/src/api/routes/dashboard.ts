@@ -20,6 +20,21 @@ export const dashboardRoute = new Hono()
     const revenueThisMonth = paid.filter((i) => i.paidAt && i.paidAt >= thisMonth).reduce((s, i) => s + i.total, 0);
     const totalRevenue = paid.reduce((s, i) => s + i.total, 0);
 
+    // Calculate net revenue (after Stripe fees) from balance transactions
+    let totalRevenueNet = totalRevenue;
+    if (stripe) {
+      try {
+        const balance = await stripe.balance.retrieve();
+        const netCents = (balance.available ?? []).reduce((s, b) => s + b.amount, 0)
+          + (balance.pending ?? []).reduce((s, b) => s + b.amount, 0);
+        if (netCents > 0) {
+          totalRevenueNet = netCents / 100;
+        }
+      } catch {
+        // fallback to gross if Stripe call fails
+      }
+    }
+
     return c.json(
       {
         totalClients: allClients.length,
@@ -28,7 +43,7 @@ export const dashboardRoute = new Hono()
         overdueCount: overdue.length,
         pendingCount: pending.length,
         revenueThisMonth: Number(revenueThisMonth.toFixed(2)),
-        totalRevenue: Number(totalRevenue.toFixed(2)),
+        totalRevenue: Number(totalRevenueNet.toFixed(2)),
         outstandingTotal: Number([...overdue, ...pending].reduce((s, i) => s + i.total, 0).toFixed(2)),
         upcomingBookings: allBookings.filter(
           (b) => b.status === "confirmed" && b.date >= now.toISOString().slice(0, 10),
