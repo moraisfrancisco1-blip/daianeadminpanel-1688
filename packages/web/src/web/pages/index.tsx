@@ -29,6 +29,14 @@ export default function DashboardPage() {
 function DashboardContent() {
   const qc = useQueryClient();
   const [toast, setToast] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<{ month: number; year: number } | null>(null);
+
+  // Default to current month when none selected
+  const now = new Date();
+  const activeMonth = selectedMonth ?? { month: now.getMonth() + 1, year: now.getFullYear() };
+  const monthLabel = selectedMonth
+    ? new Date(selectedMonth.year, selectedMonth.month - 1).toLocaleString("en-GB", { month: "long", year: "numeric" })
+    : "this month";
 
   const stats = useQuery({
     queryKey: ["dashboard-stats"],
@@ -51,8 +59,8 @@ function DashboardContent() {
     queryFn: async () => (await api.dashboard["upcoming-bookings"].$get({ query: { limit: "6" } })).json(),
   });
   const vatSummary = useQuery({
-    queryKey: ["dashboard-vat"],
-    queryFn: async () => (await api.dashboard["vat-summary"].$get()).json(),
+    queryKey: ["dashboard-vat", activeMonth.year, activeMonth.month],
+    queryFn: async () => (await api.dashboard["vat-summary"].$get({ query: { year: String(activeMonth.year), month: String(activeMonth.month) } })).json(),
   });
   const activityFeed = useQuery({
     queryKey: ["dashboard-activity"],
@@ -63,9 +71,9 @@ function DashboardContent() {
     queryFn: async () => (await api.reminders.overdue.$get()).json(),
   });
   const stripeCommissions = useQuery({
-    queryKey: ["dashboard-stripe-commissions"],
-    queryFn: async () => (await api.dashboard["stripe-commissions"].$get()).json(),
-    refetchInterval: 60000, // refresh every 60s for real-time feel
+    queryKey: ["dashboard-stripe-commissions", activeMonth.year, activeMonth.month],
+    queryFn: async () => (await api.dashboard["stripe-commissions"].$get({ query: { year: String(activeMonth.year), month: String(activeMonth.month) } })).json(),
+    refetchInterval: 60000,
   });
 
   // best-effort trigger of overdue reminder check on load (fallback automation)
@@ -140,7 +148,17 @@ function DashboardContent() {
       {/* Revenue chart + VAT summary */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-card border border-border rounded-xl p-6">
-          <h3 className="font-medium mb-4">Revenue — last 6 months</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-medium">Revenue — last 6 months</h3>
+            {selectedMonth && (
+              <button
+                onClick={() => setSelectedMonth(null)}
+                className="text-xs text-brand-copper hover:underline font-medium"
+              >
+                ← Back to current month
+              </button>
+            )}
+          </div>
           {revenueChart.isLoading ? (
             <div className="h-56 bg-muted rounded animate-pulse" />
           ) : (
@@ -152,15 +170,28 @@ function DashboardContent() {
                 <Tooltip
                   formatter={(v: number) => [`€${v.toFixed(2)}`, "Revenue"]}
                   contentStyle={{ borderRadius: 8, borderColor: "#EBDFCF", fontSize: 12 }}
+                  cursor={{ fill: "rgba(174,99,63,0.1)" }}
                 />
-                <Bar dataKey="revenue" fill="#AE633F" radius={[4, 4, 0, 0]} />
+                <Bar
+                  dataKey="revenue"
+                  fill="#AE633F"
+                  radius={[4, 4, 0, 0]}
+                  cursor="pointer"
+                  onClick={(data: any) => {
+                    const payload = data?.payload;
+                    if (payload?.month) {
+                      const [y, m] = payload.month.split("-").map(Number);
+                      setSelectedMonth({ year: y, month: m });
+                    }
+                  }}
+                />
               </BarChart>
             </ResponsiveContainer>
           )}
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6">
-          <h3 className="font-medium mb-4">VAT — this month</h3>
+          <h3 className="font-medium mb-4">VAT — {monthLabel}</h3>
           {vatSummary.isLoading ? (
             <div className="h-40 bg-muted rounded animate-pulse" />
           ) : (
@@ -187,7 +218,7 @@ function DashboardContent() {
       {stripeCommissions.data && stripeCommissions.data.available !== false && (
         <div className="bg-card border border-border rounded-xl p-6">
           <h3 className="font-medium mb-4 flex items-center gap-2">
-            <CreditCard className="size-4 text-brand-copper" /> Stripe Commissions — this month
+            <CreditCard className="size-4 text-brand-copper" /> Stripe Commissions — {monthLabel}
             <span className="ml-auto text-xs text-muted-foreground">Auto-refreshes every 60s</span>
           </h3>
           {stripeCommissions.isLoading ? (
