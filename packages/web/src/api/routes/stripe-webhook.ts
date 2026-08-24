@@ -15,6 +15,17 @@ import { claimWebhookEvent, markWebhookEventProcessed, markWebhookEventFailed } 
 
 export const stripeWebhookRoute = new Hono();
 
+// Idempotent payment recording — the unique stripe_payment_intent_id prevents duplicates.
+async function recordStripePayment(paymentIntentId: string, invoiceId: number, amount: number, paidAt: Date): Promise<boolean> {
+  const [existing] = await db.select().from(payments).where(eq(payments.stripePaymentIntentId, paymentIntentId));
+  if (existing) return false;
+  await db
+    .insert(payments)
+    .values({ invoiceId, amount, method: "stripe", paidAt, stripePaymentIntentId: paymentIntentId })
+    .onConflictDoNothing();
+  return true;
+}
+
 // Raw body parser for Stripe webhook signature verification
 stripeWebhookRoute.post("/", async (c) => {
   if (!stripe) {
@@ -189,6 +200,79 @@ stripeWebhookRoute.post("/", async (c) => {
         break;
       }
 
+      // ==================== PAYMENT INTENT (in-person / Terminal / direct) ====================
+
+      case "payment_intent.succeeded": {
+        const pi = event.data.object as Stripe.PaymentIntent;
+        console.log("[stripe-webhook] PaymentIntent succeeded:", pi.id);
+
+        if (pi.status !== "succeeded") break;
+
+        // Idempotency: skip if this payment is already recorded.
+        const [existingPayment] = await db.select().from(payments).where(eq(payments.stripePaymentIntentId, pi.id));
+        if (existingPayment) {
+          console.log("[stripe-webhook] Payment already recorded:", pi.id);
+          break;
+        }
+
+        // Identify the client via the Stripe customer (never by name alone).
+        const customerId = typeof pi.customer === "string" ? pi.customer : (pi.customer as { id?: string } | null)?.id ?? null;
+        let clientId: number | null = null;
+        if (customerId) {
+          const client = await findClientByStripeCustomerId(customerId);
+          if (client) clientId = client.id;
+        }
+        if (!clientId) {
+          console.log("[stripe-webhook] No local client for PaymentIntent, skipping:", pi.id, "customer:", customerId);
+          break;
+        }
+
+        const amount = Number((pi.amount / 100).toFixed(2));
+
+        // Reuse an existing invoice if one already exists for this PaymentIntent.
+        const [existingInvoice] = await db.select().from(invoices).where(eq(invoices.stripePaymentIntentId, pi.id));
+        let invoiceId = existingInvoice?.id;
+
+        if (!invoiceId) {
+          const vatRate = 0.09;
+          const base = Number((amount / (1 + vatRate)).toFixed(2));
+          const vat = Number((amount - base).toFixed(2));
+          const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
+          const issueDate = new Date();
+          const dueDate = new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+          const [invoice] = await db
+            .insert(invoices)
+            .values({
+              invoiceNumber,
+              clientId,
+              status: "paid",
+              issueDate,
+              dueDate,
+              subtotal: base,
+              vatTotal: vat,
+              total: amount,
+              paidAt: new Date(pi.created * 1000),
+              stripePaymentIntentId: pi.id,
+            })
+            .returning();
+
+          await db.insert(invoiceItems).values({
+            invoiceId: invoice!.id,
+            description: pi.description ?? "Stripe payment",
+            quantity: 1,
+            unitPrice: amount,
+            vatRate,
+            amount,
+          });
+
+          invoiceId = invoice!.id;
+        }
+
+        await recordStripePayment(pi.id, invoiceId, amount, new Date(pi.created * 1000));
+        break;
+      }
+
       // ==================== CHECKOUT / BOOKING EVENT ====================
 
       case "checkout.session.completed": {
@@ -267,6 +351,7 @@ stripeWebhookRoute.post("/", async (c) => {
           vatTotal: vat,
           total: amount,
           paidAt: new Date(),
+          stripePaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent as { id?: string } | null)?.id ?? null,
         }).returning();
 
         await db.insert(invoiceItems).values({
@@ -280,6 +365,11 @@ stripeWebhookRoute.post("/", async (c) => {
 
         // Link the invoice to the booking (also powers idempotency on retries).
         await db.update(bookings).set({ invoiceId: invoice!.id }).where(eq(bookings.id, bookingId));
+
+        // Record the payment (idempotent — never duplicates).
+        if (invoice!.stripePaymentIntentId) {
+          await recordStripePayment(invoice!.stripePaymentIntentId, invoice!.id, amount, new Date());
+        }
 
         // Send confirmation emails
         await sendEmail({
