@@ -12,7 +12,7 @@ import { createCalendarEvent, getGoogleBusyIntervals, deleteCalendarEvent, updat
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 import { claimWebhookEvent, markWebhookEventProcessed, markWebhookEventFailed } from "../services/webhook-idempotency";
 
-const BUFFER_MIN = 15; // gap required between sessions
+const BUFFER_MIN = 0; // no artificial gap between sessions — only real overlap is blocked
 const SLOT_GRANULARITY_MIN = 15;
 
 type DaySchedule = {
