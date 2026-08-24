@@ -15,13 +15,16 @@ export default function BookingManualPage() {
 
 function BookingManualContent() {
   const [toast, setToast] = useState<string | null>(null);
+  const initialParams = new URLSearchParams(window.location.search);
+  const initialDate = initialParams.get("date") ?? "";
+  const initialTime = initialParams.get("time") ?? "";
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     phone: "",
     serviceId: "",
-    date: "",
-    startTime: "",
+    date: initialDate,
+    startTime: initialTime,
     depositAmount: "",
     paymentMethod: "",
     notes: "",

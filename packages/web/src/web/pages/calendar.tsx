@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2 } from "lucide-react";
 
 type BookingItem = {
@@ -87,6 +87,7 @@ export default function CalendarPage() {
 
 function CalendarContent() {
   const qc = useQueryClient();
+  const [, navigateTo] = useLocation();
   const [view, setView] = useState<"day" | "week" | "month">("week");
   const [cursor, setCursor] = useState(() => new Date());
   const [selectedBooking, setSelectedBooking] = useState<BookingItem | null>(null);
@@ -277,6 +278,7 @@ function CalendarContent() {
           durationMap={durationMap}
           onSelectBooking={setSelectedBooking}
           onDeleteBlock={deleteBlock.mutate}
+          onCreateBooking={(date, time) => navigateTo(`/bookings/manual?date=${date}&time=${time}`)}
         />
       )}
 
@@ -308,8 +310,9 @@ function TimeGrid(props: {
   durationMap: Map<number, number>;
   onSelectBooking: (b: BookingItem) => void;
   onDeleteBlock: (id: number) => void;
+  onCreateBooking: (date: string, time: string) => void;
 }) {
-  const { view, cursor, bookings, blocked, durationMap, onSelectBooking, onDeleteBlock } = props;
+  const { view, cursor, bookings, blocked, durationMap, onSelectBooking, onDeleteBlock, onCreateBooking } = props;
   const days = view === "day" ? [cursor] : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(cursor), i));
 
   const top = (t: string) => ((timeToMin(t) - HOUR_START * 60) / 60) * HOUR_HEIGHT;
@@ -345,7 +348,18 @@ function TimeGrid(props: {
             const dayBlocked = blocked.filter((b) => b.date === iso);
             const weeklyBlocks = WEEKLY_BLOCKS[day.getDay()] ?? [];
             return (
-              <div key={iso} className="flex-1 min-w-[90px] border-l relative" style={{ height: HOURS.length * HOUR_HEIGHT }}>
+              <div
+                key={iso}
+                className="flex-1 min-w-[90px] border-l relative"
+                style={{ height: HOURS.length * HOUR_HEIGHT }}
+                onDoubleClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const y = e.clientY - rect.top;
+                  const mins = HOUR_START * 60 + (y / HOUR_HEIGHT) * 60;
+                  const snapped = Math.floor(mins / 15) * 15;
+                  onCreateBooking(iso, minToTime(snapped));
+                }}
+              >
                 {HOURS.map((h) => (
                   <div key={h} className="border-b border-border/40" style={{ height: HOUR_HEIGHT }} />
                 ))}
@@ -354,12 +368,14 @@ function TimeGrid(props: {
                     key={i}
                     className="absolute left-0 right-0 bg-neutral-200/70 border border-dashed border-neutral-300"
                     style={{ top: top(wb.start), height: height(timeToMin(wb.end) - timeToMin(wb.start)) }}
+                    onDoubleClick={(e) => e.stopPropagation()}
                   />
                 ))}
                 {dayBlocked.map((blk) => (
                   <button
                     key={blk.id}
                     onClick={() => onDeleteBlock(blk.id)}
+                    onDoubleClick={(e) => e.stopPropagation()}
                     className="absolute left-0.5 right-0.5 rounded bg-neutral-300/90 border border-neutral-400 px-1 text-left overflow-hidden"
                     style={{ top: top(blk.startTime), height: height(timeToMin(blk.endTime) - timeToMin(blk.startTime)) }}
                     title={`Bloqueado ${blk.startTime}–${blk.endTime}${blk.reason ? " · " + blk.reason : ""}`}
@@ -376,6 +392,7 @@ function TimeGrid(props: {
                     <button
                       key={b.id}
                       onClick={() => onSelectBooking(b)}
+                      onDoubleClick={(e) => e.stopPropagation()}
                       className={`absolute left-0.5 right-0.5 rounded border px-1.5 py-1 text-left overflow-hidden shadow-sm ${style}`}
                       style={{ top: top(b.startTime), height: height(dur) }}
                     >
