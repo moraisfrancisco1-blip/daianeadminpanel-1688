@@ -54,7 +54,9 @@ function BookingManualContent() {
           notes: data.notes || null,
         },
       });
-      return response.json();
+      const json = await response.json();
+      if (!response.ok) throw new Error((json as { message?: string })?.message ?? "Failed to create booking");
+      return json;
     },
     onSuccess: () => {
       setToast("Booking created successfully!");
@@ -73,8 +75,7 @@ function BookingManualContent() {
       });
     },
     onError: (error) => {
-      setToast("Error creating booking. Please try again.");
-      console.error(error);
+      setToast(error instanceof Error ? error.message : "Error creating booking. Please try again.");
       setTimeout(() => setToast(null), 3000);
     },
   });
@@ -104,13 +105,19 @@ function BookingManualContent() {
     });
   };
 
-  // Generate time slots
-  const timeSlots = [];
-  for (let h = 10; h < 18; h++) {
-    for (let m = 0; m < 60; m += 15) {
-      timeSlots.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-    }
-  }
+  // Fetch available slots for the selected date/service (respects weekly schedule + bookings).
+  const availability = useQuery({
+    queryKey: ["availability", formData.date, formData.serviceId],
+    queryFn: async () => {
+      if (!formData.date || !formData.serviceId) return { slots: [] as string[] };
+      const res = await api.bookings.availability.$get({
+        query: { date: formData.date, serviceId: formData.serviceId },
+      });
+      return (await res.json()) as { slots: string[] };
+    },
+    enabled: !!formData.date && !!formData.serviceId,
+  });
+  const timeSlots = availability.data?.slots ?? [];
 
   return (
     <div className="space-y-6">
@@ -220,7 +227,7 @@ function BookingManualContent() {
               </label>
               <select
                 value={formData.serviceId}
-                onChange={(e) => setFormData({ ...formData, serviceId: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, serviceId: e.target.value, startTime: "" })}
                 className="w-full px-4 py-2.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
                 required
               >
@@ -243,7 +250,7 @@ function BookingManualContent() {
                   <input
                     type="date"
                     value={formData.date}
-                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value, startTime: "" })}
                     className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
                     required
                   />

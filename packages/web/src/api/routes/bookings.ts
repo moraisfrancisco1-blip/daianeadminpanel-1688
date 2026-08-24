@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../database";
 import { bookings, services, clients, invoices, invoiceItems } from "../database/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, inArray } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { stripe } from "../services/stripe";
 import { sendEmail } from "../services/email";
@@ -12,11 +12,64 @@ import { createCalendarEvent, getGoogleBusyIntervals, deleteCalendarEvent, updat
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 import { claimWebhookEvent, markWebhookEventProcessed, markWebhookEventFailed } from "../services/webhook-idempotency";
 
-const WORK_DAYS = [1, 3, 5]; // Mon, Wed, Fri
-const WORK_START_MIN = 10 * 60; // 10:00
-const WORK_END_MIN = 18 * 60; // 18:00 — last session must END by this time
 const BUFFER_MIN = 15; // gap required between sessions
 const SLOT_GRANULARITY_MIN = 15;
+
+type DaySchedule = {
+  startMin: number;
+  endMin: number;
+  blocks: { startMin: number; endMin: number }[];
+};
+
+// Centralized per-day availability (Mon/Wed/Fri). Days not listed have no availability.
+const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
+  1: { // Monday — block 09:00–10:00
+    startMin: 9 * 60,
+    endMin: 18 * 60,
+    blocks: [{ startMin: 9 * 60, endMin: 10 * 60 }],
+  },
+  3: { // Wednesday — block 09:00–11:00
+    startMin: 9 * 60,
+    endMin: 18 * 60,
+    blocks: [{ startMin: 9 * 60, endMin: 11 * 60 }],
+  },
+  5: { // Friday — starts 08:45, block 10:00–11:00
+    startMin: 8 * 60 + 45,
+    endMin: 18 * 60,
+    blocks: [{ startMin: 10 * 60, endMin: 11 * 60 }],
+  },
+};
+
+function scheduleFor(dateStr: string): DaySchedule | null {
+  const day = new Date(dateStr + "T00:00:00").getDay();
+  return WEEKLY_SCHEDULE[day] ?? null;
+}
+
+function isBlockedBySchedule(schedule: DaySchedule, startMin: number, endMin: number): boolean {
+  return schedule.blocks.some((b) => startMin < b.endMin && endMin > b.startMin);
+}
+
+async function isSlotAvailable(date: string, startTime: string, durationMinutes: number): Promise<boolean> {
+  const schedule = scheduleFor(date);
+  if (!schedule) return false;
+  const start = timeToMinutes(startTime);
+  const end = start + durationMinutes;
+  if (start < schedule.startMin || end > schedule.endMin) return false;
+  if (isBlockedBySchedule(schedule, start, end)) return false;
+
+  const allServices = await db.select().from(services);
+  const serviceDuration = new Map(allServices.map((s) => [s.id, s.durationMinutes]));
+  const overlapping = await db
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.date, date), inArray(bookings.status, ["confirmed", "pending_deposit"])));
+
+  return !overlapping.some((b) => {
+    const bs = timeToMinutes(b.startTime);
+    const bd = serviceDuration.get(b.serviceId) ?? 60;
+    return start < bs + bd + BUFFER_MIN && end > bs - BUFFER_MIN;
+  });
+}
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -34,9 +87,8 @@ export const bookingsRoute = new Hono()
   .get("/availability", async (c) => {
     const date = c.req.query("date");
     if (!date) return c.json({ message: "date required (YYYY-MM-DD)" }, 400);
-    const d = new Date(date + "T00:00:00");
-    const day = d.getDay();
-    if (!WORK_DAYS.includes(day)) return c.json({ slots: [] }, 200);
+    const schedule = scheduleFor(date);
+    if (!schedule) return c.json({ slots: [] }, 200);
 
     const [service] = c.req.query("serviceId")
       ? await db.select().from(services).where(eq(services.id, Number(c.req.query("serviceId"))))
@@ -62,6 +114,11 @@ export const bookingsRoute = new Hono()
       return { start: start - BUFFER_MIN, end: start + dur + BUFFER_MIN };
     });
 
+    // Static blocked intervals from the weekly schedule (e.g. 09:00–10:00 on Monday).
+    for (const b of schedule.blocks) {
+      busyIntervals.push({ start: b.startMin, end: b.endMin });
+    }
+
     // Also block out any events already on Daiane's Google Calendar for this date,
     // so the public site never offers a slot she's already busy with elsewhere.
     try {
@@ -74,7 +131,7 @@ export const bookingsRoute = new Hono()
     }
 
     const slots: string[] = [];
-    for (let start = WORK_START_MIN; start + duration <= WORK_END_MIN; start += SLOT_GRANULARITY_MIN) {
+    for (let start = schedule.startMin; start + duration <= schedule.endMin; start += SLOT_GRANULARITY_MIN) {
       const end = start + duration;
       const overlaps = busyIntervals.some((b) => start < b.end && end > b.start);
       if (!overlaps) slots.push(minutesToTime(start));
@@ -86,6 +143,13 @@ export const bookingsRoute = new Hono()
     const body = await c.req.json();
     const [service] = await db.select().from(services).where(eq(services.id, body.serviceId));
     if (!service) return c.json({ message: "Invalid service" }, 400);
+
+    if (!body.date || !body.startTime) {
+      return c.json({ message: "Date and time are required" }, 400);
+    }
+    if (!(await isSlotAvailable(body.date, body.startTime, service.durationMinutes))) {
+      return c.json({ message: "The selected time is not available" }, 409);
+    }
 
     const payFullNow = !!body.payFullNow;
     const amountToCharge = payFullNow ? service.price : 25;
@@ -297,6 +361,13 @@ export const bookingsRoute = new Hono()
     const body = await c.req.json();
     const [service] = await db.select().from(services).where(eq(services.id, body.serviceId));
     if (!service) return c.json({ message: "Invalid service" }, 400);
+
+    if (!body.date || !body.startTime) {
+      return c.json({ message: "Date and time are required" }, 400);
+    }
+    if (!(await isSlotAvailable(body.date, body.startTime, service.durationMinutes))) {
+      return c.json({ message: "The selected time is not available" }, 409);
+    }
 
     // Find or create client
     let [client] = await db.select().from(clients).where(eq(clients.email, body.email));
