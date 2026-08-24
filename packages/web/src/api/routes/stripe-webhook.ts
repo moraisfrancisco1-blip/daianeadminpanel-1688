@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import { stripe } from "../services/stripe";
 import { syncStripeCustomerToLocal, findClientByStripeCustomerId, syncStripeInvoiceStatus, findInvoiceByStripeInvoiceId } from "../services/stripe-sync";
 import { db } from "../database";
-import { clients, invoices, bookings, services, invoiceItems } from "../database/schema";
+import { clients, invoices, bookings, services, invoiceItems, payments } from "../database/schema";
 import { eq } from "drizzle-orm";
 import { nextNumber } from "../lib/counters";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml } from "../lib/email-templates";
@@ -130,13 +130,36 @@ stripeWebhookRoute.post("/", async (c) => {
 
       case "invoice.paid": {
         const invoice = event.data.object as Stripe.Invoice;
-        const invoiceData = invoice as unknown as { id: string; paid_at?: number };
-        console.log("[stripe-webhook] Invoice paid:", invoiceData.id);
-        await syncStripeInvoiceStatus(
-          invoiceData.id,
-          "paid",
-          invoiceData.paid_at ? new Date(invoiceData.paid_at * 1000) : new Date()
-        );
+        const invoiceId = invoice.id;
+        const paymentIntentId = invoice.payment_intent
+          ? (typeof invoice.payment_intent === "string" ? invoice.payment_intent : invoice.payment_intent.id)
+          : null;
+        const amountPaid = invoice.amount_paid ?? 0;
+        const paidAt = invoice.status_transitions?.paid_at
+          ? new Date(invoice.status_transitions.paid_at * 1000)
+          : new Date();
+
+        console.log("[stripe-webhook] Invoice paid:", invoiceId, "pi:", paymentIntentId);
+
+        // Update the invoice status (idempotent — finds by stripeInvoiceId).
+        await syncStripeInvoiceStatus(invoiceId, "paid", paidAt);
+
+        // Record the payment (idempotent — unique stripe_payment_intent_id, NULLs allowed).
+        if (paymentIntentId) {
+          const localInvoice = await findInvoiceByStripeInvoiceId(invoiceId);
+          if (localInvoice) {
+            await db
+              .insert(payments)
+              .values({
+                invoiceId: localInvoice.id,
+                amount: Number((amountPaid / 100).toFixed(2)),
+                method: "stripe",
+                paidAt,
+                stripePaymentIntentId: paymentIntentId,
+              })
+              .onConflictDoNothing();
+          }
+        }
         break;
       }
 

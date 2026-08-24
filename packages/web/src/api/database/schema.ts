@@ -1,4 +1,5 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 /**
  * You can write your custom database schema here.
@@ -104,16 +105,27 @@ export const invoiceItems = sqliteTable("invoice_items", {
   amount: real("amount").notNull(),
 });
 
-export const payments = sqliteTable("payments", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  invoiceId: integer("invoice_id").notNull(),
-  amount: real("amount").notNull(),
-  method: text("method").notNull().default("manual"), // manual, stripe, ideal, cash, bank_transfer
-  paidAt: integer("paid_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  notes: text("notes"),
-});
+export const payments = sqliteTable(
+  "payments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    invoiceId: integer("invoice_id").notNull(),
+    amount: real("amount").notNull(),
+    method: text("method").notNull().default("manual"), // manual, stripe, ideal, cash, bank_transfer
+    paidAt: integer("paid_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    notes: text("notes"),
+    // Stripe PaymentIntent ID — null for manual payments, unique for Stripe payments.
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+  },
+  (table) => [
+    // Unique only for non-null values (manual payments keep NULL and can repeat).
+    uniqueIndex("payments_stripe_payment_intent_id_unique")
+      .on(table.stripePaymentIntentId)
+      .where(sql`${table.stripePaymentIntentId} IS NOT NULL`),
+  ],
+);
 
 export const bookings = sqliteTable("bookings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
