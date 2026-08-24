@@ -5,6 +5,8 @@ import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { StatusPill } from "../components/status-pill";
 import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
+import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
+import { useSort, cmpStr, cmpNum, cmpDate, cmpNumberLike, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { Plus, X, ArrowRightCircle, Pencil, Trash2, Loader2 } from "lucide-react";
 
 export default function QuotesPage() {
@@ -32,11 +34,22 @@ interface ServiceItem {
 interface QuoteRow {
   id: number;
   quoteNumber: string;
+  clientId: number;
   clientName: string | null;
   status: string;
+  issueDate: string;
   total: number;
   convertedInvoiceId: number | null;
 }
+
+type QuoteSortKey = "number" | "client" | "date" | "total" | "status";
+const quoteComparators: Record<QuoteSortKey, (a: QuoteRow, b: QuoteRow) => number> = {
+  number: (a, b) => cmpNumberLike(a.quoteNumber, b.quoteNumber),
+  client: (a, b) => cmpStr(a.clientName, b.clientName),
+  date: (a, b) => cmpDate(a.issueDate, b.issueDate),
+  total: (a, b) => cmpNum(a.total, b.total),
+  status: (a, b) => cmpStr(a.status, b.status),
+};
 
 interface QuoteDetailItem {
   description: string;
@@ -54,6 +67,8 @@ function QuotesContent() {
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [deletePendingId, setDeletePendingId] = useState<number | null>(null);
   const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const { sortKey, sortDir, toggle } = useSort<QuoteSortKey>("date", "desc");
 
   function showToast(type: "success" | "error", message: string) {
     setToast({ type, message });
@@ -198,6 +213,15 @@ function QuotesContent() {
   const clients = clientsData?.clients ?? [];
   const services = servicesData?.services ?? [];
 
+  const q = normalize(search);
+  const exactId = idFromQuery(search);
+  const filtered = quotes.filter((quote) => {
+    if (!q) return true;
+    if (matchesId(quote.id, search)) return true;
+    return normalize([quote.quoteNumber, quote.clientName].filter(Boolean).join(" ")).includes(q);
+  });
+  const sorted = [...filtered].sort((a, b) => applyDir(quoteComparators[sortKey](a, b), sortDir));
+
   return (
     <div className="space-y-6">
       {toast && (
@@ -219,6 +243,8 @@ function QuotesContent() {
         </Button>
       </div>
 
+      <SearchInput value={search} onChange={setSearch} placeholder="Search by number, client or #ID…" />
+
       {quotesLoading ? (
         <div className="space-y-2">
           {[...Array(4)].map((_, i) => (
@@ -231,18 +257,24 @@ function QuotesContent() {
           <table className="w-full text-sm min-w-[640px]">
             <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
               <tr>
-                <th className="px-4 py-3 font-medium">Quote #</th>
-                <th className="px-4 py-3 font-medium">Client</th>
-                <th className="px-4 py-3 font-medium">Total</th>
-                <th className="px-4 py-3 font-medium">Status</th>
+                <SortableTh label="Quote #" active={sortKey === "number"} dir={sortDir} onClick={() => toggle("number")} />
+                <SortableTh label="Client" active={sortKey === "client"} dir={sortDir} onClick={() => toggle("client")} />
+                <SortableTh label="Date" active={sortKey === "date"} dir={sortDir} onClick={() => toggle("date")} />
+                <SortableTh label="Total" active={sortKey === "total"} dir={sortDir} onClick={() => toggle("total")} />
+                <SortableTh label="Status" active={sortKey === "status"} dir={sortDir} onClick={() => toggle("status")} />
                 <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {quotes.map((q) => (
-                <tr key={q.id} className="border-t border-border hover:bg-accent/40 transition-colors">
+              {sorted.map((q) => {
+                const isExact = exactId !== null && q.id === exactId;
+                return (
+                <tr key={q.id} className={`border-t border-border hover:bg-accent/40 transition-colors ${isExact ? "bg-primary/10" : ""}`}>
                   <td className="px-4 py-3 font-medium">{q.quoteNumber}</td>
                   <td className="px-4 py-3">{q.clientName ?? "—"}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {new Date(q.issueDate).toLocaleDateString("en-GB")}
+                  </td>
                   <td className="px-4 py-3 font-medium">€{q.total.toFixed(2)}</td>
                   <td className="px-4 py-3">
                     <StatusPill status={q.status} />
@@ -285,14 +317,9 @@ function QuotesContent() {
                     </div>
                   </td>
                 </tr>
-              ))}
-              {quotes.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                    No quotes yet.
-                  </td>
-                </tr>
-              )}
+                );
+              })}
+              {sorted.length === 0 && <EmptyRow colSpan={6} searching={q.length > 0} noun="quotes" />}
             </tbody>
           </table>
           </div>

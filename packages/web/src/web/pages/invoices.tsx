@@ -5,6 +5,8 @@ import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { StatusPill } from "../components/status-pill";
 import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
+import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
+import { useSort, cmpStr, cmpNum, cmpDate, cmpNumberLike, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil } from "lucide-react";
 import { downloadFile } from "../lib/download";
 
@@ -35,13 +37,24 @@ interface InvoiceRow {
   invoiceNumber: string;
   clientName: string | null;
   clientId: number;
+  clientEmail: string | null;
   status: string;
   dueDate: string;
   total: number;
   paidAt: string | null;
   reminderCount: number;
   issueDate: string;
+  stripePaymentIntentId: string | null;
 }
+
+type InvoiceSortKey = "number" | "client" | "date" | "total" | "status";
+const invoiceComparators: Record<InvoiceSortKey, (a: InvoiceRow, b: InvoiceRow) => number> = {
+  number: (a, b) => cmpNumberLike(a.invoiceNumber, b.invoiceNumber),
+  client: (a, b) => cmpStr(a.clientName, b.clientName),
+  date: (a, b) => cmpDate(a.issueDate, b.issueDate),
+  total: (a, b) => cmpNum(a.total, b.total),
+  status: (a, b) => cmpStr(a.status, b.status),
+};
 
 function InvoicesContent() {
   const [showForm, setShowForm] = useState(false);
@@ -51,6 +64,8 @@ function InvoicesContent() {
   const [items, setItems] = useState<LineItemDraft[]>([{ description: "", quantity: 1, unitPrice: 0, vatRate: 0.09 }]);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const { sortKey, sortDir, toggle } = useSort<InvoiceSortKey>("date", "desc");
 
   function showToast(type: "success" | "error", message: string) {
     setToast({ type, message });
@@ -226,6 +241,15 @@ function InvoicesContent() {
   const clients = clientsData?.clients ?? [];
   const services = servicesData?.services ?? [];
 
+  const q = normalize(search);
+  const exactId = idFromQuery(search);
+  const filtered = invoices.filter((inv) => {
+    if (!q) return true;
+    if (matchesId(inv.id, search)) return true;
+    return normalize([inv.invoiceNumber, inv.clientName, inv.clientEmail, inv.stripePaymentIntentId].filter(Boolean).join(" ")).includes(q);
+  });
+  const sorted = [...filtered].sort((a, b) => applyDir(invoiceComparators[sortKey](a, b), sortDir));
+
   return (
     <div className="space-y-6">
       {toast && (
@@ -247,6 +271,8 @@ function InvoicesContent() {
         </Button>
       </div>
 
+      <SearchInput value={search} onChange={setSearch} placeholder="Search by number, client, email, ID or PaymentIntent…" />
+
       {invoicesLoading ? (
         <div className="space-y-2">
           {[...Array(6)].map((_, i) => (
@@ -259,19 +285,25 @@ function InvoicesContent() {
           <table className="w-full text-sm min-w-[640px]">
             <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
               <tr>
-                <th className="px-4 py-3 font-medium">Invoice #</th>
-                <th className="px-4 py-3 font-medium">Client</th>
+                <SortableTh label="Invoice #" active={sortKey === "number"} dir={sortDir} onClick={() => toggle("number")} />
+                <SortableTh label="Client" active={sortKey === "client"} dir={sortDir} onClick={() => toggle("client")} />
+                <SortableTh label="Date" active={sortKey === "date"} dir={sortDir} onClick={() => toggle("date")} />
                 <th className="px-4 py-3 font-medium">Due</th>
-                <th className="px-4 py-3 font-medium">Total</th>
-                <th className="px-4 py-3 font-medium">Status</th>
+                <SortableTh label="Total" active={sortKey === "total"} dir={sortDir} onClick={() => toggle("total")} />
+                <SortableTh label="Status" active={sortKey === "status"} dir={sortDir} onClick={() => toggle("status")} />
                 <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {invoices.map((inv) => (
-                <tr key={inv.id} className="border-t border-border hover:bg-accent/40 transition-colors">
+              {sorted.map((inv) => {
+                const isExact = exactId !== null && inv.id === exactId;
+                return (
+                <tr key={inv.id} className={`border-t border-border hover:bg-accent/40 transition-colors ${isExact ? "bg-primary/10" : ""}`}>
                   <td className="px-4 py-3 font-medium">{inv.invoiceNumber}</td>
                   <td className="px-4 py-3">{inv.clientName ?? "—"}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {new Date(inv.issueDate).toLocaleDateString("en-GB")}
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {new Date(inv.dueDate).toLocaleDateString("en-GB")}
                   </td>
@@ -336,14 +368,9 @@ function InvoicesContent() {
                     </div>
                   </td>
                 </tr>
-              ))}
-              {invoices.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                    No invoices yet.
-                  </td>
-                </tr>
-              )}
+                );
+              })}
+              {sorted.length === 0 && <EmptyRow colSpan={7} searching={q.length > 0} noun="invoices" />}
             </tbody>
           </table>
           </div>

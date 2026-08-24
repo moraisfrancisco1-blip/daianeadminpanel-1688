@@ -25,6 +25,8 @@ export const invoicesRoute = new Hono()
         paidAt: invoices.paidAt,
         reminderCount: invoices.reminderCount,
         clientName: clients.name,
+        clientEmail: clients.email,
+        stripePaymentIntentId: invoices.stripePaymentIntentId,
       })
       .from(invoices)
       .leftJoin(clients, eq(invoices.clientId, clients.id))

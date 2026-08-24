@@ -101,6 +101,8 @@ function CalendarContent() {
 
   const bookingsQ = useQuery({
     queryKey: ["bookings"],
+    staleTime: 0,
+    refetchOnMount: "always",
     queryFn: async (): Promise<BookingItem[]> => {
       const res = await api.bookings.$get();
       const data = (await res.json()) as { bookings: BookingItem[] };
@@ -110,6 +112,8 @@ function CalendarContent() {
 
   const servicesQ = useQuery({
     queryKey: ["services"],
+    staleTime: 0,
+    refetchOnMount: "always",
     queryFn: async (): Promise<Service[]> => {
       const res = await api.services.$get();
       const data = (await res.json()) as { services: Service[] };
@@ -130,6 +134,8 @@ function CalendarContent() {
 
   const blockedQ = useQuery({
     queryKey: ["blocked", range.from, range.to],
+    staleTime: 0,
+    refetchOnMount: "always",
     queryFn: async (): Promise<BlockedSlot[]> => {
       const res = await api.bookings.blocked.$get({ query: { from: range.from, to: range.to } });
       const data = (await res.json()) as { blocked: BlockedSlot[] };

@@ -348,6 +348,7 @@ export const bookingsRoute = new Hono()
     const all = await db
       .select({
         id: bookings.id,
+        clientId: bookings.clientId,
         name: bookings.name,
         email: bookings.email,
         phone: bookings.phone,
@@ -379,13 +380,20 @@ export const bookingsRoute = new Hono()
       return c.json({ message: "The selected time is not available" }, 409);
     }
 
-    // Find or create client
-    let [client] = await db.select().from(clients).where(eq(clients.email, body.email));
+    // Find or create client (prefer explicit clientId, then email lookup, then create)
+    let client = body.clientId
+      ? (await db.select().from(clients).where(eq(clients.id, Number(body.clientId))))[0]
+      : undefined;
+    if (!client && body.email) {
+      client = (await db.select().from(clients).where(eq(clients.email, body.email)))[0];
+    }
     if (!client) {
-      [client] = await db
-        .insert(clients)
-        .values({ name: body.name, email: body.email, phone: body.phone ?? null })
-        .returning();
+      client = (
+        await db
+          .insert(clients)
+          .values({ name: body.name, email: body.email, phone: body.phone ?? null })
+          .returning()
+      )[0];
     }
 
     const [booking] = await db

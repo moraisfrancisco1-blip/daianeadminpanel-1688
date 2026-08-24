@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
-import { Plus, Search, Mail, Phone, X, Pencil, Trash2 } from "lucide-react";
+import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
+import { useSort, cmpStr, cmpNum, cmpDate, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
+import { Plus, Mail, Phone, X, Pencil, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 
 export default function ClientsPage() {
@@ -14,12 +16,20 @@ export default function ClientsPage() {
   );
 }
 
+type ClientSortKey = "id" | "name" | "created";
+const clientComparators: Record<ClientSortKey, (a: any, b: any) => number> = {
+  id: (a, b) => cmpNum(a.id, b.id),
+  name: (a, b) => cmpStr(a.name, b.name),
+  created: (a, b) => cmpDate(a.createdAt, b.createdAt),
+};
+
 function ClientsContent() {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingClient, setEditingClient] = useState<any>(null);
   const [deletingClient, setDeletingClient] = useState<any>(null);
   const qc = useQueryClient();
+  const { sortKey, sortDir, toggle } = useSort<ClientSortKey>("name", "asc");
 
   const clients = useQuery({
     queryKey: ["clients"],
@@ -63,9 +73,14 @@ function ClientsContent() {
   });
 
   const clientList = clients.data && "clients" in clients.data ? clients.data.clients : [];
-  const filtered = clientList.filter((c: any) =>
-    [c.name, c.email, c.phone].filter(Boolean).some((v) => v!.toLowerCase().includes(search.toLowerCase())),
-  );
+  const q = normalize(search);
+  const exactId = idFromQuery(search);
+  const filtered = clientList.filter((c: any) => {
+    if (!q) return true;
+    if (matchesId(c.id, search)) return true;
+    return normalize([c.name, c.email, c.phone, c.debtorNumber].filter(Boolean).join(" ")).includes(q);
+  });
+  const sorted = [...filtered].sort((a: any, b: any) => applyDir(clientComparators[sortKey](a, b), sortDir));
 
   return (
     <div className="space-y-6">
@@ -79,15 +94,7 @@ function ClientsContent() {
         </Button>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search clients…"
-          className="w-full h-10 pl-9 pr-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-      </div>
+      <SearchInput value={search} onChange={setSearch} placeholder="Search by name, email, phone or #ID…" />
 
       {clients.isLoading ? (
         <div className="space-y-2">
@@ -101,56 +108,59 @@ function ClientsContent() {
           <table className="w-full text-sm min-w-[640px]">
             <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
               <tr>
-                <th className="px-4 py-3 font-medium">Name</th>
+                <SortableTh label="#" active={sortKey === "id"} dir={sortDir} onClick={() => toggle("id")} />
+                <SortableTh label="Name" active={sortKey === "name"} dir={sortDir} onClick={() => toggle("name")} />
                 <th className="px-4 py-3 font-medium">Contact</th>
                 <th className="px-4 py-3 font-medium">City</th>
                 <th className="px-4 py-3 font-medium">Country</th>
+                <SortableTh label="Created" active={sortKey === "created"} dir={sortDir} onClick={() => toggle("created")} />
                 <th className="px-4 py-3 font-medium w-20"></th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c: any) => (
-                <tr key={c.id} className="border-t border-border hover:bg-accent/40 transition-colors">
-                  <td className="px-4 py-3 font-medium">
-                    <Link to={`/clients/${c.id}`} className="hover:text-primary hover:underline">
-                      {c.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    <div className="flex flex-col gap-0.5">
-                      {c.email && (
-                        <span className="flex items-center gap-1.5">
-                          <Mail className="size-3" /> {c.email}
-                        </span>
-                      )}
-                      {c.phone && (
-                        <span className="flex items-center gap-1.5">
-                          <Phone className="size-3" /> {c.phone}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.city ?? "—"}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.country ?? "—"}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="icon-sm" onClick={() => setEditingClient(c)}>
-                        <Pencil className="size-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon-sm" onClick={() => setDeletingClient(c)}>
-                        <Trash2 className="size-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                    No clients found.
-                  </td>
-                </tr>
-              )}
+              {sorted.map((c: any) => {
+                const isExact = exactId !== null && c.id === exactId;
+                return (
+                  <tr key={c.id} className={`border-t border-border hover:bg-accent/40 transition-colors ${isExact ? "bg-primary/10" : ""}`}>
+                    <td className="px-4 py-3 text-muted-foreground">#{c.id}</td>
+                    <td className="px-4 py-3 font-medium">
+                      <Link to={`/clients/${c.id}`} className="hover:text-primary hover:underline">
+                        {c.name}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      <div className="flex flex-col gap-0.5">
+                        {c.email && (
+                          <span className="flex items-center gap-1.5">
+                            <Mail className="size-3" /> {c.email}
+                          </span>
+                        )}
+                        {c.phone && (
+                          <span className="flex items-center gap-1.5">
+                            <Phone className="size-3" /> {c.phone}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{c.city ?? "—"}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{c.country ?? "—"}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-GB") : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon-sm" onClick={() => setEditingClient(c)}>
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon-sm" onClick={() => setDeletingClient(c)}>
+                          <Trash2 className="size-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {sorted.length === 0 && <EmptyRow colSpan={7} searching={q.length > 0} noun="clients" />}
             </tbody>
           </table>
           </div>

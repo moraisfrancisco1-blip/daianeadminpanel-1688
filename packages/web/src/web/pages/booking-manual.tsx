@@ -1,9 +1,12 @@
-import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
+import { normalize, idFromQuery } from "../lib/list";
 import { Link } from "wouter";
-import { ArrowLeft, Loader2, Calendar, Clock, User, Mail, Phone, FileText } from "lucide-react";
+import { ArrowLeft, Loader2, Calendar, Clock, User, Mail, Phone, FileText, Search, UserPlus, AlertTriangle, X } from "lucide-react";
+
+type ClientSuggestion = { id: number; name: string; email: string | null; phone: string | null };
 
 export default function BookingManualPage() {
   return (
@@ -14,7 +17,11 @@ export default function BookingManualPage() {
 }
 
 function BookingManualContent() {
+  const qc = useQueryClient();
   const [toast, setToast] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [duplicateWarning, setDuplicateWarning] = useState<ClientSuggestion[] | null>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
   const initialParams = new URLSearchParams(window.location.search);
   const initialDate = initialParams.get("date") ?? "";
   const initialTime = initialParams.get("time") ?? "";
@@ -22,6 +29,7 @@ function BookingManualContent() {
     name: "",
     email: "",
     phone: "",
+    clientId: null as number | null,
     serviceId: "",
     date: initialDate,
     startTime: initialTime,
@@ -42,10 +50,34 @@ function BookingManualContent() {
     queryFn: async () => (await api.clients.$get()).json(),
   });
 
+  const allClients = (clients.data as { clients?: ClientSuggestion[] } | undefined)?.clients ?? [];
+  const searchQ = normalize(search);
+  const searchId = idFromQuery(search);
+  const filteredClients = allClients
+    .filter((c) => {
+      if (!searchQ) return false;
+      if (searchId !== null && c.id === searchId) return true;
+      return normalize([c.name, c.email, c.phone].filter(Boolean).join(" ")).includes(searchQ);
+    })
+    .slice(0, 8);
+  const showDropdown = search.trim().length > 0;
+
+  // Close the dropdown when clicking outside the search field.
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearch("");
+      }
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, []);
+
   const createBooking = useMutation({
     mutationFn: async (data: typeof formData) => {
       const response = await api.bookings.manual.$post({
         json: {
+          clientId: data.clientId ?? undefined,
           name: data.name,
           email: data.email,
           phone: data.phone || null,
@@ -62,13 +94,17 @@ function BookingManualContent() {
       return json;
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bookings"] });
+      qc.invalidateQueries({ queryKey: ["blocked"] });
       setToast("Booking created successfully!");
       setTimeout(() => setToast(null), 3000);
+      setSearch("");
       // Reset form
       setFormData({
         name: "",
         email: "",
         phone: "",
+        clientId: null,
         serviceId: "",
         date: "",
         startTime: "",
@@ -83,6 +119,34 @@ function BookingManualContent() {
     },
   });
 
+  const handleClientSelect = (client: ClientSuggestion) => {
+    setFormData((prev) => ({
+      ...prev,
+      clientId: client.id,
+      name: client.name,
+      email: client.email ?? "",
+      phone: client.phone ?? "",
+    }));
+    setSearch("");
+  };
+
+  const handleCreateNew = () => {
+    setFormData((prev) => ({ ...prev, clientId: null }));
+    setSearch("");
+  };
+
+  const findPossibleDuplicates = () => {
+    const emailN = normalize(formData.email);
+    const phoneN = normalize(formData.phone);
+    const nameN = normalize(formData.name);
+    return allClients.filter((c) => {
+      if (emailN && c.email && normalize(c.email) === emailN) return true;
+      if (phoneN && c.phone && normalize(c.phone) === phoneN) return true;
+      if (nameN && normalize(c.name) === nameN) return true;
+      return false;
+    });
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.email || !formData.serviceId || !formData.date || !formData.startTime) {
@@ -90,22 +154,15 @@ function BookingManualContent() {
       setTimeout(() => setToast(null), 3000);
       return;
     }
+    // Duplicate check for new clients (no existing client selected).
+    if (formData.clientId == null) {
+      const dupes = findPossibleDuplicates();
+      if (dupes.length > 0) {
+        setDuplicateWarning(dupes);
+        return;
+      }
+    }
     createBooking.mutate(formData);
-  };
-
-  // Filter clients based on email input for autocomplete
-  const allClients = (clients.data as { clients?: Array<{ id: number; name: string; email: string | null; phone: string | null }> } | undefined)?.clients ?? [];
-  const filteredClients = allClients
-    .filter((c) => c.email && c.email.toLowerCase().includes(formData.email.toLowerCase()))
-    .slice(0, 5);
-
-  const handleClientSelect = (client: { name: string; email: string | null; phone: string | null }) => {
-    setFormData({
-      ...formData,
-      name: client.name,
-      email: client.email ?? "",
-      phone: client.phone ?? "",
-    });
   };
 
   // Fetch available slots for the selected date/service (respects weekly schedule + bookings).
@@ -153,6 +210,63 @@ function BookingManualContent() {
           </h2>
 
           <div className="space-y-4">
+            <div ref={searchRef}>
+              <label className="block text-sm font-medium mb-1.5">Find client</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search by name, email, phone or #ID…"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+                {showDropdown && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
+                    {filteredClients.map((client) => (
+                      <button
+                        key={client.id}
+                        type="button"
+                        onClick={() => handleClientSelect(client)}
+                        className="w-full px-4 py-2.5 text-left hover:bg-accent transition-colors border-b border-border last:border-b-0"
+                      >
+                        <div className="font-medium">{client.name}</div>
+                        <div className="text-xs text-muted-foreground flex flex-wrap gap-x-2 gap-y-0.5">
+                          {client.email && <span>{client.email}</span>}
+                          {client.phone && <span>{client.phone}</span>}
+                          <span className="text-brand-copper font-medium">Cliente #{client.id}</span>
+                        </div>
+                      </button>
+                    ))}
+                    {filteredClients.length === 0 && (
+                      <p className="px-4 py-2.5 text-sm text-muted-foreground">No matching clients.</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleCreateNew}
+                      className="w-full px-4 py-2.5 text-left hover:bg-accent transition-colors border-t border-border flex items-center gap-2 text-sm font-medium"
+                    >
+                      <UserPlus className="size-4" /> Create new client
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1.5">
+                Name <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="Client name"
+                className="w-full px-4 py-2.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                required
+              />
+            </div>
+
             <div>
               <label className="block text-sm font-medium mb-1.5">
                 Email <span className="text-destructive">*</span>
@@ -168,36 +282,6 @@ function BookingManualContent() {
                   required
                 />
               </div>
-              {/* Client autocomplete */}
-              {filteredClients.length > 0 && formData.email && (
-                <div className="absolute z-10 w-full mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
-                  {filteredClients.map((client, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => handleClientSelect(client)}
-                      className="w-full px-4 py-2 text-left hover:bg-accent transition-colors"
-                    >
-                      <div className="font-medium">{client.name}</div>
-                      <div className="text-xs text-muted-foreground">{client.email}</div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1.5">
-                Name <span className="text-destructive">*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="Client name"
-                className="w-full px-4 py-2.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                required
-              />
             </div>
 
             <div>
@@ -362,6 +446,60 @@ function BookingManualContent() {
           </button>
         </div>
       </form>
+
+      {duplicateWarning && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-xl p-6 w-full max-w-md space-y-4 relative">
+            <button onClick={() => setDuplicateWarning(null)} className="absolute top-4 right-4 text-muted-foreground">
+              <X className="size-4" />
+            </button>
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="size-5 text-amber-500 mt-0.5 shrink-0" />
+              <div>
+                <h2 className="font-display text-lg font-semibold">Possible existing client found</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Please select an existing client or confirm that you want to create a new one.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {duplicateWarning.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    handleClientSelect(c);
+                    setDuplicateWarning(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-md border border-border hover:bg-accent transition-colors"
+                >
+                  <div className="font-medium">{c.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {[c.email, c.phone].filter(Boolean).join(" · ")} · Cliente #{c.id}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => setDuplicateWarning(null)}
+                className="flex-1 px-4 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setDuplicateWarning(null);
+                  createBooking.mutate(formData);
+                }}
+                className="flex-1 px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:opacity-90"
+              >
+                Create new anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

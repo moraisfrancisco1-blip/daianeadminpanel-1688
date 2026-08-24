@@ -3,11 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { StatusPill } from "../components/status-pill";
+import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
+import { useSort, cmpStr, cmpDate, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { Link } from "wouter";
 import { Trash2, Loader2, Plus } from "lucide-react";
 
 type BookingItem = {
   id: number;
+  clientId: number | null;
   name: string;
   email: string;
   phone: string | null;
@@ -22,6 +25,14 @@ type BookingItem = {
   invoiceId: number | null;
 };
 
+type BookingSortKey = "date" | "client" | "service" | "status";
+const bookingComparators: Record<BookingSortKey, (a: BookingItem, b: BookingItem) => number> = {
+  date: (a, b) => cmpDate(`${a.date}T${a.startTime}`, `${b.date}T${b.startTime}`),
+  client: (a, b) => cmpStr(a.name, b.name),
+  service: (a, b) => cmpStr(a.serviceName, b.serviceName),
+  status: (a, b) => cmpStr(a.status, b.status),
+};
+
 export default function BookingsPage() {
   return (
     <Protected>
@@ -33,6 +44,8 @@ export default function BookingsPage() {
 function BookingsContent() {
   const qc = useQueryClient();
   const [toast, setToast] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const { sortKey, sortDir, toggle } = useSort<BookingSortKey>("date", "asc");
 
   const bookings = useQuery({
     queryKey: ["bookings"],
@@ -57,6 +70,17 @@ function BookingsContent() {
       deleteBooking.mutate(id);
     }
   }
+
+  const allBookings = bookings.data?.bookings ?? [];
+  const q = normalize(search);
+  const exactId = idFromQuery(search);
+  const filtered = allBookings.filter((b) => {
+    if (!q) return true;
+    if (matchesId(b.id, search)) return true;
+    if (b.clientId != null && matchesId(b.clientId, search)) return true;
+    return normalize([b.name, b.email, b.serviceName].filter(Boolean).join(" ")).includes(q);
+  });
+  const sorted = [...filtered].sort((a, b) => applyDir(bookingComparators[sortKey](a, b), sortDir));
 
   return (
     <div className="space-y-6">
@@ -84,6 +108,8 @@ function BookingsContent() {
         </Link>
       </div>
 
+      <SearchInput value={search} onChange={setSearch} placeholder="Search by client, service or #ID…" />
+
       {bookings.isLoading ? (
         <div className="space-y-2">
           {[...Array(4)].map((_, i) => (
@@ -96,18 +122,20 @@ function BookingsContent() {
           <table className="w-full text-sm min-w-[640px]">
             <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
               <tr>
-                <th className="px-4 py-3 font-medium">Client</th>
-                <th className="px-4 py-3 font-medium">Service</th>
-                <th className="px-4 py-3 font-medium">Date</th>
+                <SortableTh label="Client" active={sortKey === "client"} dir={sortDir} onClick={() => toggle("client")} />
+                <SortableTh label="Service" active={sortKey === "service"} dir={sortDir} onClick={() => toggle("service")} />
+                <SortableTh label="Date" active={sortKey === "date"} dir={sortDir} onClick={() => toggle("date")} />
                 <th className="px-4 py-3 font-medium">Time</th>
                 <th className="px-4 py-3 font-medium">Deposit</th>
-                <th className="px-4 py-3 font-medium">Status</th>
+                <SortableTh label="Status" active={sortKey === "status"} dir={sortDir} onClick={() => toggle("status")} />
                 <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {(bookings.data?.bookings ?? []).map((b) => (
-                <tr key={b.id} className="border-t border-border hover:bg-accent/40 transition-colors">
+              {sorted.map((b) => {
+                const isExact = exactId !== null && (b.id === exactId || b.clientId === exactId);
+                return (
+                <tr key={b.id} className={`border-t border-border hover:bg-accent/40 transition-colors ${isExact ? "bg-primary/10" : ""}`}>
                   <td className="px-4 py-3 font-medium">
                     {b.name}
                     <div className="text-xs text-muted-foreground">{b.email}</div>
@@ -137,14 +165,9 @@ function BookingsContent() {
                     </button>
                   </td>
                 </tr>
-              ))}
-              {(bookings.data?.bookings ?? []).length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                    No bookings yet.
-                  </td>
-                </tr>
-              )}
+                );
+              })}
+              {sorted.length === 0 && <EmptyRow colSpan={7} searching={q.length > 0} noun="bookings" />}
             </tbody>
           </table>
           </div>

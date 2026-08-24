@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
+import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
+import { useSort, cmpStr, cmpNum, cmpDate, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { Plus, Trash2, X, Minus, Pencil, Loader2 } from "lucide-react";
 
 type Pkg = {
@@ -13,9 +15,20 @@ type Pkg = {
   sessionsUsed: number;
   price: number;
   expiresAt: string | null;
+  purchasedAt: string;
   notes: string | null;
 };
 type Client = { id: number; name: string };
+
+type PkgSortKey = "client" | "name" | "sessions" | "remaining" | "price" | "expires";
+const pkgComparators: Record<PkgSortKey, (a: Pkg, b: Pkg) => number> = {
+  client: (a, b) => cmpStr(a.clientName, b.clientName),
+  name: (a, b) => cmpStr(a.name, b.name),
+  sessions: (a, b) => cmpNum(a.totalSessions, b.totalSessions),
+  remaining: (a, b) => cmpNum(a.totalSessions - a.sessionsUsed, b.totalSessions - b.sessionsUsed),
+  price: (a, b) => cmpNum(a.price, b.price),
+  expires: (a, b) => cmpDate(a.expiresAt, b.expiresAt),
+};
 
 export default function PackagesPage() {
   return (
@@ -30,6 +43,8 @@ function PackagesContent() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Pkg | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const { sortKey, sortDir, toggle } = useSort<PkgSortKey>("client", "asc");
 
   const notify = (m: string) => {
     setToast(m);
@@ -73,6 +88,17 @@ function PackagesContent() {
     },
   });
 
+  const allPkgs = pkgs.data ?? [];
+  const q = normalize(search);
+  const exactId = idFromQuery(search);
+  const filtered = allPkgs.filter((p) => {
+    if (!q) return true;
+    if (matchesId(p.id, search)) return true;
+    if (matchesId(p.clientId, search)) return true;
+    return normalize([p.clientName, p.name].filter(Boolean).join(" ")).includes(q);
+  });
+  const sorted = [...filtered].sort((a, b) => applyDir(pkgComparators[sortKey](a, b), sortDir));
+
   return (
     <div className="space-y-6">
       {toast && (
@@ -96,6 +122,8 @@ function PackagesContent() {
         </button>
       </div>
 
+      <SearchInput value={search} onChange={setSearch} placeholder="Pesquisar por cliente, pacote ou #ID…" />
+
       {pkgs.isLoading ? (
         <div className="h-40 rounded-xl bg-muted animate-pulse" />
       ) : (
@@ -104,21 +132,22 @@ function PackagesContent() {
             <table className="w-full text-sm min-w-[640px]">
               <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Cliente</th>
-                  <th className="px-4 py-3 font-medium">Pacote</th>
-                  <th className="px-4 py-3 font-medium">Sessões</th>
-                  <th className="px-4 py-3 font-medium">Restantes</th>
-                  <th className="px-4 py-3 font-medium">Preço</th>
-                  <th className="px-4 py-3 font-medium">Expira</th>
+                  <SortableTh label="Cliente" active={sortKey === "client"} dir={sortDir} onClick={() => toggle("client")} />
+                  <SortableTh label="Pacote" active={sortKey === "name"} dir={sortDir} onClick={() => toggle("name")} />
+                  <SortableTh label="Sessões" active={sortKey === "sessions"} dir={sortDir} onClick={() => toggle("sessions")} />
+                  <SortableTh label="Restantes" active={sortKey === "remaining"} dir={sortDir} onClick={() => toggle("remaining")} />
+                  <SortableTh label="Preço" active={sortKey === "price"} dir={sortDir} onClick={() => toggle("price")} />
+                  <SortableTh label="Expira" active={sortKey === "expires"} dir={sortDir} onClick={() => toggle("expires")} />
                   <th className="px-4 py-3 font-medium text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>
-                {(pkgs.data ?? []).map((p) => {
+                {sorted.map((p) => {
                   const remaining = p.totalSessions - p.sessionsUsed;
                   const expired = p.expiresAt && new Date(p.expiresAt) < new Date();
+                  const isExact = exactId !== null && (p.id === exactId || p.clientId === exactId);
                   return (
-                    <tr key={p.id} className="border-t border-border">
+                    <tr key={p.id} className={`border-t border-border ${isExact ? "bg-primary/10" : ""}`}>
                       <td className="px-4 py-3 font-medium">{p.clientName ?? "—"}</td>
                       <td className="px-4 py-3">{p.name}</td>
                       <td className="px-4 py-3">
@@ -167,13 +196,7 @@ function PackagesContent() {
                     </tr>
                   );
                 })}
-                {(pkgs.data ?? []).length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                      Sem pacotes.
-                    </td>
-                  </tr>
-                )}
+                {sorted.length === 0 && <EmptyRow colSpan={7} searching={q.length > 0} noun="pacotes" />}
               </tbody>
             </table>
           </div>
