@@ -1,7 +1,44 @@
 import { stripe } from "./stripe";
 import { db } from "../database";
 import { clients, invoices } from "../database/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+
+/** Normalize an email for stable comparison (trim + lowercase). Never changes stored data. */
+export function normalizeEmail(email: string | null | undefined): string | null {
+  if (!email) return null;
+  const t = email.trim().toLowerCase();
+  return t.length > 0 ? t : null;
+}
+
+/** Stable idempotency key derived from an email (guards Stripe customer creation against concurrent duplicates). */
+function customerIdempotencyKey(email: string): string {
+  return "customer-" + createHash("sha256").update(email).digest("hex").slice(0, 24);
+}
+
+/** Returns the IDs of Stripe customers matching a normalized email (empty if none or error). */
+async function listStripeCustomersByEmail(normalizedEmail: string): Promise<string[]> {
+  if (!stripe) return [];
+  try {
+    const res = await stripe.customers.list({ email: normalizedEmail, limit: 10 });
+    return res.data.filter((c) => normalizeEmail(c.email) === normalizedEmail).map((c) => c.id);
+  } catch (err) {
+    console.error("[stripe-sync] Error listing Stripe customers by email:", err);
+    return [];
+  }
+}
+
+/** Returns the single Stripe customer id matching an email, or null (0 or multiple matches). */
+export async function findStripeCustomerByEmail(email: string | null | undefined): Promise<string | null> {
+  const norm = normalizeEmail(email);
+  if (!norm) return null;
+  const ids = await listStripeCustomersByEmail(norm);
+  if (ids.length === 1) return ids[0];
+  if (ids.length > 1) {
+    console.warn(`[stripe-sync] Multiple Stripe customers for email ${norm} — manual review needed:`, ids);
+  }
+  return null;
+}
 
 /**
  * Creates a customer in Stripe and returns the Stripe customer ID
@@ -20,23 +57,42 @@ export async function createStripeCustomer(client: {
     return null;
   }
 
+  const email = normalizeEmail(client.email);
+
   try {
-    const customer = await stripe.customers.create({
-      name: client.name,
-      email: client.email ?? undefined,
-      phone: client.phone ?? undefined,
-      address: client.address
-        ? {
-            line1: client.address,
-            city: client.city ?? undefined,
-            country: client.country ?? "NL",
-            postal_code: client.zipCode ?? undefined,
-          }
-        : undefined,
-      metadata: {
-        source: "admin-panel",
+    // 1. If an email exists, look for an existing Stripe customer first (avoids duplicates).
+    if (email) {
+      const existingIds = await listStripeCustomersByEmail(email);
+      if (existingIds.length === 1) {
+        console.log(`[stripe-sync] Reusing existing Stripe customer ${existingIds[0]} for email ${email}`);
+        return existingIds[0];
+      }
+      if (existingIds.length > 1) {
+        console.warn(`[stripe-sync] Multiple Stripe customers for email ${email} — NOT creating a new one, manual review needed:`, existingIds);
+        return null;
+      }
+    }
+
+    // 2. Create a new customer (idempotent by email to guard against concurrent duplicate creation).
+    const customer = await stripe.customers.create(
+      {
+        name: client.name,
+        email: client.email ?? undefined,
+        phone: client.phone ?? undefined,
+        address: client.address
+          ? {
+              line1: client.address,
+              city: client.city ?? undefined,
+              country: client.country ?? "NL",
+              postal_code: client.zipCode ?? undefined,
+            }
+          : undefined,
+        metadata: {
+          source: "admin-panel",
+        },
       },
-    });
+      email ? { idempotencyKey: customerIdempotencyKey(email) } : undefined,
+    );
 
     return customer.id;
   } catch (error) {
@@ -131,8 +187,6 @@ export async function syncStripeCustomerToLocal(stripeCustomer: {
     return null;
   }
 
-  const existingClient = await findClientByStripeCustomerId(stripeCustomer.id);
-
   const clientData = {
     name: stripeCustomer.name,
     email: stripeCustomer.email,
@@ -144,19 +198,38 @@ export async function syncStripeCustomerToLocal(stripeCustomer: {
     stripeCustomerId: stripeCustomer.id,
   };
 
-  if (existingClient) {
-    // Update existing client
+  // 1. Authoritative match: stripe_customer_id.
+  const existingById = await findClientByStripeCustomerId(stripeCustomer.id);
+  if (existingById) {
     const [updated] = await db
       .update(clients)
       .set(clientData)
-      .where(eq(clients.id, existingClient.id))
+      .where(eq(clients.id, existingById.id))
       .returning();
     return updated?.id ?? null;
-  } else {
-    // Create new client
-    const [created] = await db.insert(clients).values(clientData).returning();
-    return created?.id ?? null;
   }
+
+  // 2. Fallback: normalized email (avoids local duplicates when a customer is created outside the admin).
+  const email = normalizeEmail(stripeCustomer.email);
+  if (email) {
+    const byEmail = await db.select().from(clients).where(sql`lower(trim(${clients.email})) = ${email}`);
+    if (byEmail.length === 1) {
+      const [updated] = await db
+        .update(clients)
+        .set(clientData)
+        .where(eq(clients.id, byEmail[0].id))
+        .returning();
+      return updated?.id ?? null;
+    }
+    if (byEmail.length > 1) {
+      console.warn(`[stripe-sync] Multiple local clients for email ${email} — not linking Stripe customer ${stripeCustomer.id} automatically`);
+      return null;
+    }
+  }
+
+  // 3. No safe match: create a new local client.
+  const [created] = await db.insert(clients).values(clientData).returning();
+  return created?.id ?? null;
 }
 
 // ==================== INVOICE SYNC ====================

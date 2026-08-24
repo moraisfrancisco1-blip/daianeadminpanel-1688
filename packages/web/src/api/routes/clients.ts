@@ -3,7 +3,7 @@ import { db } from "../database";
 import { clients, invoices, bookings, payments, quotes, services } from "../database/schema";
 import { eq, desc, inArray, or } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
-import { createStripeCustomer, updateStripeCustomer, deleteStripeCustomer } from "../services/stripe-sync";
+import { createStripeCustomer, updateStripeCustomer, findStripeCustomerByEmail } from "../services/stripe-sync";
 
 export const clientsRoute = new Hono()
   .get("/", requireAuth, async (c) => {
@@ -97,9 +97,15 @@ export const clientsRoute = new Hono()
     const [existingClient] = await db.select().from(clients).where(eq(clients.id, id));
     if (!existingClient) return c.json({ message: "Not found" }, 404);
     
-    // Update client in Stripe if they have a stripeCustomerId
-    if (existingClient.stripeCustomerId) {
-      await updateStripeCustomer(existingClient.stripeCustomerId, {
+    // Resolve the Stripe customer: keep existing link, or associate by email if none.
+    let stripeCustomerId = existingClient.stripeCustomerId;
+    if (!stripeCustomerId && body.email) {
+      stripeCustomerId = await findStripeCustomerByEmail(body.email);
+    }
+
+    // Update the linked customer in Stripe (reuses existing — never creates a duplicate here).
+    if (stripeCustomerId) {
+      await updateStripeCustomer(stripeCustomerId, {
         name: body.name,
         email: body.email ?? null,
         phone: body.phone ?? null,
@@ -122,6 +128,7 @@ export const clientsRoute = new Hono()
         country: body.country ?? null,
         dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
         notes: body.notes ?? null,
+        stripeCustomerId,
       })
       .where(eq(clients.id, id))
       .returning();
@@ -134,10 +141,8 @@ export const clientsRoute = new Hono()
     const [existingClient] = await db.select().from(clients).where(eq(clients.id, id));
     if (!existingClient) return c.json({ message: "Not found" }, 404);
     
-    // Delete client from Stripe if they have a stripeCustomerId
-    if (existingClient.stripeCustomerId) {
-      await deleteStripeCustomer(existingClient.stripeCustomerId);
-    }
+    // NOTE: we intentionally do NOT delete the Stripe customer.
+    // The Stripe customer and its financial history (invoices, charges) are preserved.
     
     await db.delete(clients).where(eq(clients.id, id));
     return c.json({ success: true }, 200);
