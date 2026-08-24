@@ -162,4 +162,17 @@ export const counters = sqliteTable("counters", {
   value: integer("value").notNull().default(0),
 });
 
+export const stripeWebhookEvents = sqliteTable("stripe_webhook_events", {
+  // Stripe event id (evt_...) — the primary key enforces a single row per event.
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  // processing | processed | failed
+  status: text("status").notNull().default("processing"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export * from "./auth-schema";

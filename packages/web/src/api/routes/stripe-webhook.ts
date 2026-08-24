@@ -11,6 +11,7 @@ import { sendEmail } from "../services/email";
 import { COMPANY } from "../lib/company";
 import { createCalendarEvent } from "../services/google-calendar";
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
+import { claimWebhookEvent, markWebhookEventProcessed, markWebhookEventFailed } from "../services/webhook-idempotency";
 
 export const stripeWebhookRoute = new Hono();
 
@@ -34,13 +35,15 @@ stripeWebhookRoute.post("/", async (c) => {
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    event = await stripe.webhooks.constructEventAsync(body, signature, webhookSecret);
   } catch (err) {
     console.error("[stripe-webhook] Signature verification failed:", err);
     return c.json({ message: "Invalid signature" }, 400);
   }
 
   console.log("[stripe-webhook] Received event:", event.type);
+
+  let processingEventId: string | null = null;
 
   try {
     switch (event.type) {
@@ -175,14 +178,40 @@ stripeWebhookRoute.post("/", async (c) => {
           break;
         }
 
+        // Idempotency: claim with a persistent state machine (processing -> processed/failed).
+        // A failed attempt is retried on the next Stripe delivery; a successful one is never re-run.
+        const claim = await claimWebhookEvent(event.id, event.type);
+        if (claim === "skip") {
+          console.log("[stripe-webhook] Duplicate checkout event, skipping:", event.id);
+          break;
+        }
+        processingEventId = event.id;
+
         const [booking] = await db.select().from(bookings).where(eq(bookings.id, bookingId));
         if (!booking) {
           console.log("[stripe-webhook] Booking not found:", bookingId);
+          await markWebhookEventProcessed(event.id);
+          processingEventId = null;
           break;
         }
 
-        // Confirm booking
-        await db.update(bookings).set({ status: "confirmed", depositStatus: "paid" }).where(eq(bookings.id, bookingId));
+        // Ensure the booking is confirmed/paid (idempotent).
+        if (booking.status !== "confirmed" || booking.depositStatus !== "paid") {
+          await db.update(bookings).set({ status: "confirmed", depositStatus: "paid" }).where(eq(bookings.id, bookingId));
+        }
+
+        // Only create the invoice (and send notifications) once. On a retry after a
+        // partial failure, or a different event for the same booking, an invoice already
+        // exists so this block is skipped — no duplicates.
+        const [existingInvoice] = await db.select().from(invoices).where(eq(invoices.bookingId, bookingId));
+        if (existingInvoice) {
+          if (booking.invoiceId == null) {
+            await db.update(bookings).set({ invoiceId: existingInvoice.id }).where(eq(bookings.id, bookingId));
+          }
+          await markWebhookEventProcessed(event.id);
+          processingEventId = null;
+          break;
+        }
 
         // Find or create client
         let [client] = await db.select().from(clients).where(eq(clients.email, booking.email));
@@ -226,6 +255,9 @@ stripeWebhookRoute.post("/", async (c) => {
           amount,
         });
 
+        // Link the invoice to the booking (also powers idempotency on retries).
+        await db.update(bookings).set({ invoiceId: invoice!.id }).where(eq(bookings.id, bookingId));
+
         // Send confirmation emails
         await sendEmail({
           to: booking.email,
@@ -235,7 +267,12 @@ stripeWebhookRoute.post("/", async (c) => {
             serviceName: service?.name ?? "Session",
             date: booking.date,
             startTime: booking.startTime,
+            durationMinutes: service?.durationMinutes ?? 60,
+            depositAmount: booking.depositAmount,
+            depositStatus: "paid",
+            paymentMethod: booking.paymentMethod,
             payFullNow: booking.payFullNow,
+            servicePrice: service?.price ?? 0,
           }),
         });
 
@@ -285,6 +322,9 @@ stripeWebhookRoute.post("/", async (c) => {
           }),
         );
 
+        await markWebhookEventProcessed(event.id);
+        processingEventId = null;
+
         break;
       }
 
@@ -293,6 +333,9 @@ stripeWebhookRoute.post("/", async (c) => {
     }
   } catch (error) {
     console.error("[stripe-webhook] Error processing event:", error);
+    if (processingEventId) {
+      await markWebhookEventFailed(processingEventId, error instanceof Error ? error.message : String(error));
+    }
     return c.json({ message: "Error processing event" }, 500);
   }
 

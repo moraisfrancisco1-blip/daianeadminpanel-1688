@@ -311,12 +311,14 @@ export async function syncStripeInvoiceStatus(stripeInvoiceId: string, status: s
       break;
     case "open":
     case "uncollectible":
+    case "sent":
       localStatus = "sent";
       break;
     case "paid":
       localStatus = "paid";
       break;
     case "void":
+    case "cancelled":
       localStatus = "cancelled";
       break;
     default:

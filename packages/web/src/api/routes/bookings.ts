@@ -10,6 +10,7 @@ import { nextNumber } from "../lib/counters";
 import { COMPANY } from "../lib/company";
 import { createCalendarEvent, getGoogleBusyIntervals, deleteCalendarEvent, updateCalendarEvent } from "../services/google-calendar";
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
+import { claimWebhookEvent, markWebhookEventProcessed, markWebhookEventFailed } from "../services/webhook-idempotency";
 
 const WORK_DAYS = [1, 3, 5]; // Mon, Wed, Fri
 const WORK_START_MIN = 10 * 60; // 10:00
@@ -547,7 +548,7 @@ export const bookingsRoute = new Hono()
     const body = await c.req.text();
     let event;
     try {
-      event = stripe.webhooks.constructEvent(body, sig!, process.env.STRIPE_WEBHOOK_SECRET!);
+      event = await stripe.webhooks.constructEventAsync(body, sig!, process.env.STRIPE_WEBHOOK_SECRET!);
     } catch (err) {
       return c.json({ message: "Invalid signature" }, 400);
     }
@@ -556,12 +557,37 @@ export const bookingsRoute = new Hono()
       const session = event.data.object as { metadata?: { bookingId?: string } };
       const bookingId = Number(session.metadata?.bookingId);
       if (bookingId) {
-        const [booking] = await db.select().from(bookings).where(eq(bookings.id, bookingId));
-        if (booking) {
-          await db
-            .update(bookings)
-            .set({ status: "confirmed", depositStatus: "paid" })
-            .where(eq(bookings.id, bookingId));
+        // Idempotency: claim with a persistent state machine (processing -> processed/failed).
+        const claim = await claimWebhookEvent(event.id, event.type);
+        if (claim === "skip") {
+          console.log("[bookings/webhook] Duplicate checkout event, skipping:", event.id);
+          return c.json({ received: true }, 200);
+        }
+
+        try {
+          const [booking] = await db.select().from(bookings).where(eq(bookings.id, bookingId));
+          if (!booking) {
+            console.log("[bookings/webhook] Booking not found:", bookingId);
+            await markWebhookEventProcessed(event.id);
+            return c.json({ received: true }, 200);
+          }
+
+          // Ensure the booking is confirmed/paid (idempotent).
+          if (booking.status !== "confirmed" || booking.depositStatus !== "paid") {
+            await db.update(bookings).set({ status: "confirmed", depositStatus: "paid" }).where(eq(bookings.id, bookingId));
+          }
+
+          // Only create the invoice (and send notifications) once. On a retry after a
+          // partial failure, or a different event for the same booking, an invoice already
+          // exists so this block is skipped — no duplicates.
+          const [existingInvoice] = await db.select().from(invoices).where(eq(invoices.bookingId, bookingId));
+          if (existingInvoice) {
+            if (booking.invoiceId == null) {
+              await db.update(bookings).set({ invoiceId: existingInvoice.id }).where(eq(bookings.id, bookingId));
+            }
+            await markWebhookEventProcessed(event.id);
+            return c.json({ received: true }, 200);
+          }
 
           // find or create client
           let [client] = await db.select().from(clients).where(eq(clients.email, booking.email));
@@ -659,6 +685,11 @@ export const bookingsRoute = new Hono()
               payFullNow: booking.payFullNow,
             }),
           );
+
+          await markWebhookEventProcessed(event.id);
+        } catch (error) {
+          await markWebhookEventFailed(event.id, error instanceof Error ? error.message : String(error));
+          return c.json({ message: "Error processing event" }, 500);
         }
       }
     }
