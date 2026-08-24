@@ -1,0 +1,109 @@
+name: Apply booking and payment hotfix
+
+on:
+  push:
+    paths:
+      - .github/workflows/apply-hotfix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - name: Apply exact hotfixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          bookings = Path('packages/web/src/api/routes/bookings.ts')
+          text = bookings.read_text()
+          old = 'const BUFFER_MIN = 15; // gap required between sessions\nconst SLOT_GRANULARITY_MIN = 15;'
+          new = '''// Sessions may be booked back-to-back when the requested duration fits exactly.
+// Keep a separate calendar buffer for external Google events.
+const SESSION_BUFFER_MIN = 0;
+const GOOGLE_CALENDAR_BUFFER_MIN = 15;
+const SLOT_GRANULARITY_MIN = 15;'''
+          if old not in text:
+              raise SystemExit('bookings.ts: buffer declaration not found')
+          text = text.replace(old, new, 1)
+          old = 'return start < bs + bd + BUFFER_MIN && end > bs - BUFFER_MIN;'
+          new = 'return start < bs + bd + SESSION_BUFFER_MIN && end > bs - SESSION_BUFFER_MIN;'
+          if old not in text:
+              raise SystemExit('bookings.ts: overlap check not found')
+          text = text.replace(old, new, 1)
+          old = '''    // Each existing booking blocks [start - buffer, start + duration + buffer)
+    // so every session keeps at least a 15 min gap on both sides.
+    const busyIntervals = [...existing, ...pending].map((b) => {
+      const start = timeToMinutes(b.startTime);
+      const dur = serviceDuration.get(b.serviceId) ?? 60;
+      return { start: start - BUFFER_MIN, end: start + dur + BUFFER_MIN };
+    });'''
+          new = '''    // Existing bookings block only their actual occupied duration. This allows a
+    // 90-minute service to fit exactly into a 90-minute free interval.
+    const busyIntervals = [...existing, ...pending].map((b) => {
+      const start = timeToMinutes(b.startTime);
+      const dur = serviceDuration.get(b.serviceId) ?? 60;
+      return { start, end: start + dur };
+    });'''
+          if old not in text:
+              raise SystemExit('bookings.ts: busy interval block not found')
+          text = text.replace(old, new, 1)
+          old = 'busyIntervals.push({ start: b.start - BUFFER_MIN, end: b.end + BUFFER_MIN });'
+          new = 'busyIntervals.push({ start: b.start - GOOGLE_CALENDAR_BUFFER_MIN, end: b.end + GOOGLE_CALENDAR_BUFFER_MIN });'
+          if old not in text:
+              raise SystemExit('bookings.ts: Google Calendar buffer not found')
+          text = text.replace(old, new, 1)
+          bookings.write_text(text)
+
+          webhook = Path('packages/web/src/api/routes/stripe-webhook.ts')
+          text = webhook.read_text()
+          old = '''        if (existingInvoice) {
+          if (booking.invoiceId == null) {
+            await db.update(bookings).set({ invoiceId: existingInvoice.id }).where(eq(bookings.id, bookingId));
+          }
+          await markWebhookEventProcessed(event.id);
+          processingEventId = null;
+          break;
+        }'''
+          new = '''        if (existingInvoice) {
+          if (booking.invoiceId == null) {
+            await db.update(bookings).set({ invoiceId: existingInvoice.id }).where(eq(bookings.id, bookingId));
+          }
+          const paymentIntentId = typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : (session.payment_intent as { id?: string } | null)?.id ?? null;
+          if (paymentIntentId) {
+            await recordStripePayment(paymentIntentId, existingInvoice.id, existingInvoice.total, existingInvoice.paidAt ?? new Date());
+          }
+          await markWebhookEventProcessed(event.id);
+          processingEventId = null;
+          break;
+        }'''
+          if old not in text:
+              raise SystemExit('stripe-webhook.ts: existing invoice branch not found')
+          text = text.replace(old, new, 1)
+          webhook.write_text(text)
+          PY
+      - name: Commit hotfix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/web/src/api/routes/bookings.ts packages/web/src/api/routes/stripe-webhook.ts
+          git commit -m "fix: permitir intervalos exatos e recuperar payments ausentes" || exit 0
+          git push
+      - name: Remove one-shot workflow
+        if: always()
+        run: |
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          git rm .github/workflows/apply-hotfix.yml
+          git commit -m "chore: remover workflow temporario de hotfix"
+          git push
