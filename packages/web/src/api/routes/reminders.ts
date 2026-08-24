@@ -192,8 +192,8 @@ async function runReminderCheck() {
 }
 
 export const remindersRoute = new Hono()
-  // Trigger manually or via external scheduled call (e.g. cron-job.org hitting this URL daily)
-  .post("/run", async (c) => {
+  // Trigger manually from the Admin Panel (dashboard) or an authenticated client.
+  .post("/run", requireAuth, async (c) => {
     const sent = await runReminderCheck();
     const postSession = await runPostSessionEmails();
     const sessionReminders = await runSessionReminderCheck();

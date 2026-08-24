@@ -17,7 +17,14 @@ export function LineItemEditor({
 }: {
   items: LineItemDraft[];
   onChange: (items: LineItemDraft[]) => void;
-  services: { id: number; name: string; price: number; vatRate: number }[];
+  services: {
+    id: number;
+    name: string;
+    price: number;
+    vatRate: number;
+    description?: string | null;
+    durationMinutes?: number;
+  }[];
 }) {
   function update(i: number, patch: Partial<LineItemDraft>) {
     const next = [...items];
@@ -36,7 +43,12 @@ export function LineItemEditor({
   function applyService(i: number, serviceId: number) {
     const svc = services.find((s) => s.id === serviceId);
     if (!svc) return;
-    update(i, { serviceId, description: svc.name, unitPrice: svc.price, vatRate: svc.vatRate });
+    // For Deep CORE Somatic Mobility services, use "NN' Deep CORE Somatic Mobility"
+    // instead of the internal catalog name ("Daï Massage — NN min").
+    const isDcs = !!svc.description && /deep core somatic/i.test(svc.description);
+    const durationPrefix = svc.durationMinutes ? `${svc.durationMinutes}' ` : "";
+    const description = isDcs ? `${durationPrefix}${svc.description}` : svc.name;
+    update(i, { serviceId, description, unitPrice: svc.price, vatRate: svc.vatRate });
   }
 
   const subtotal = items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);

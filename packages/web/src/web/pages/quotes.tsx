@@ -25,6 +25,8 @@ interface ServiceItem {
   name: string;
   price: number;
   vatRate: number;
+  description?: string | null;
+  durationMinutes?: number;
 }
 
 interface QuoteRow {
