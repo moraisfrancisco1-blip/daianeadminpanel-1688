@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { bookings, services, clients, invoices, invoiceItems } from "../database/schema";
+import { bookings, services, clients, invoices, invoiceItems, blockedSlots } from "../database/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { stripe } from "../services/stripe";
@@ -49,13 +49,22 @@ function isBlockedBySchedule(schedule: DaySchedule, startMin: number, endMin: nu
   return schedule.blocks.some((b) => startMin < b.endMin && endMin > b.startMin);
 }
 
-async function isSlotAvailable(date: string, startTime: string, durationMinutes: number): Promise<boolean> {
+async function isSlotAvailable(date: string, startTime: string, durationMinutes: number, excludeBookingId?: number): Promise<boolean> {
   const schedule = scheduleFor(date);
   if (!schedule) return false;
   const start = timeToMinutes(startTime);
   const end = start + durationMinutes;
   if (start < schedule.startMin || end > schedule.endMin) return false;
   if (isBlockedBySchedule(schedule, start, end)) return false;
+
+  // One-off blocked slots
+  const blocked = await db.select().from(blockedSlots).where(eq(blockedSlots.date, date));
+  const blockedOverlap = blocked.some((blk) => {
+    const bs = timeToMinutes(blk.startTime);
+    const be = timeToMinutes(blk.endTime);
+    return start < be && end > bs;
+  });
+  if (blockedOverlap) return false;
 
   const allServices = await db.select().from(services);
   const serviceDuration = new Map(allServices.map((s) => [s.id, s.durationMinutes]));
@@ -65,6 +74,7 @@ async function isSlotAvailable(date: string, startTime: string, durationMinutes:
     .where(and(eq(bookings.date, date), inArray(bookings.status, ["confirmed", "pending_deposit"])));
 
   return !overlapping.some((b) => {
+    if (excludeBookingId != null && b.id === excludeBookingId) return false;
     const bs = timeToMinutes(b.startTime);
     const bd = serviceDuration.get(b.serviceId) ?? 60;
     return start < bs + bd + BUFFER_MIN && end > bs - BUFFER_MIN;
@@ -513,6 +523,61 @@ export const bookingsRoute = new Hono()
     
     return c.json({ booking }, 200);
   })
+  // Admin: edit/reschedule a booking (validates availability + syncs Google Calendar)
+  .put("/:id", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const body = await c.req.json();
+    const [existing] = await db.select().from(bookings).where(eq(bookings.id, id));
+    if (!existing) return c.json({ message: "Booking not found" }, 404);
+
+    const [service] = await db.select().from(services).where(eq(services.id, body.serviceId ?? existing.serviceId));
+    if (!service) return c.json({ message: "Invalid service" }, 400);
+
+    const date = body.date ?? existing.date;
+    const startTime = body.startTime ?? existing.startTime;
+    const status = body.status ?? existing.status;
+
+    if (!(await isSlotAvailable(date, startTime, service.durationMinutes, id))) {
+      return c.json({ message: "The selected time is not available" }, 409);
+    }
+
+    const [booking] = await db
+      .update(bookings)
+      .set({
+        name: body.name ?? existing.name,
+        email: body.email ?? existing.email,
+        phone: body.phone ?? existing.phone,
+        serviceId: service.id,
+        date,
+        startTime,
+        notes: body.notes ?? existing.notes,
+        status,
+      })
+      .where(eq(bookings.id, id))
+      .returning();
+
+    // Sync Google Calendar
+    if (status === "cancelled") {
+      if (existing.googleEventId) {
+        await deleteCalendarEvent(existing.googleEventId);
+        await db.update(bookings).set({ googleEventId: null }).where(eq(bookings.id, id));
+      }
+    } else if (existing.googleEventId) {
+      await updateCalendarEvent({
+        eventId: existing.googleEventId,
+        summary: `${service.name} — ${booking!.name}`,
+        description: `Nome: ${booking!.name}\nServiço: ${service.name}\nTelefone: ${booking!.phone ?? "—"}`,
+        date,
+        startTime,
+        durationMinutes: service.durationMinutes,
+        attendeeEmail: booking!.email,
+      });
+    } else if (status === "confirmed") {
+      await syncBookingToGoogleCalendar(booking!, service.name, service.durationMinutes);
+    }
+
+    return c.json({ booking }, 200);
+  })
   // Admin: send remainder payment email (10 min before session ends)
   .post("/:id/send-remainder-email", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
@@ -610,6 +675,33 @@ export const bookingsRoute = new Hono()
     }
     
     await db.delete(bookings).where(eq(bookings.id, id));
+    return c.json({ success: true }, 200);
+  })
+  // Admin: one-off blocked time slots (unavailable periods)
+  .get("/blocked", requireAuth, async (c) => {
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+    const rows = await db.select().from(blockedSlots);
+    const filtered = from || to
+      ? rows.filter((r) => (!from || r.date >= from) && (!to || r.date <= to))
+      : rows;
+    filtered.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+    return c.json({ blocked: filtered }, 200);
+  })
+  .post("/blocked", requireAuth, async (c) => {
+    const body = await c.req.json();
+    if (!body.date || !body.startTime || !body.endTime) {
+      return c.json({ message: "date, startTime and endTime are required" }, 400);
+    }
+    const [block] = await db
+      .insert(blockedSlots)
+      .values({ date: body.date, startTime: body.startTime, endTime: body.endTime, reason: body.reason ?? null })
+      .returning();
+    return c.json({ block }, 201);
+  })
+  .delete("/blocked/:id", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    await db.delete(blockedSlots).where(eq(blockedSlots.id, id));
     return c.json({ success: true }, 200);
   })
   // Stripe webhook — confirms deposit/payment and auto-creates a draft invoice

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { clients, invoices } from "../database/schema";
-import { eq, desc } from "drizzle-orm";
+import { clients, invoices, bookings, payments, quotes, services } from "../database/schema";
+import { eq, desc, inArray, or } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { createStripeCustomer, updateStripeCustomer, deleteStripeCustomer } from "../services/stripe-sync";
 
@@ -14,12 +14,48 @@ export const clientsRoute = new Hono()
     const id = Number(c.req.param("id"));
     const [client] = await db.select().from(clients).where(eq(clients.id, id));
     if (!client) return c.json({ message: "Not found" }, 404);
+
     const clientInvoices = await db
       .select()
       .from(invoices)
       .where(eq(invoices.clientId, id))
       .orderBy(desc(invoices.issueDate));
-    return c.json({ client, invoices: clientInvoices }, 200);
+
+    const clientQuotes = await db
+      .select()
+      .from(quotes)
+      .where(eq(quotes.clientId, id))
+      .orderBy(desc(quotes.issueDate));
+
+    const invoiceIds = clientInvoices.map((i) => i.id);
+    const clientPayments = invoiceIds.length
+      ? await db.select().from(payments).where(inArray(payments.invoiceId, invoiceIds)).orderBy(desc(payments.paidAt))
+      : [];
+
+    const clientBookings = await db
+      .select({
+        id: bookings.id,
+        name: bookings.name,
+        email: bookings.email,
+        phone: bookings.phone,
+        serviceId: bookings.serviceId,
+        serviceName: services.name,
+        date: bookings.date,
+        startTime: bookings.startTime,
+        status: bookings.status,
+        depositAmount: bookings.depositAmount,
+        depositStatus: bookings.depositStatus,
+        createdAt: bookings.createdAt,
+      })
+      .from(bookings)
+      .leftJoin(services, eq(bookings.serviceId, services.id))
+      .where(client.email ? or(eq(bookings.clientId, id), eq(bookings.email, client.email)) : eq(bookings.clientId, id))
+      .orderBy(desc(bookings.date));
+
+    return c.json(
+      { client, invoices: clientInvoices, quotes: clientQuotes, payments: clientPayments, bookings: clientBookings },
+      200,
+    );
   })
   .post("/", requireAuth, async (c) => {
     const body = await c.req.json();

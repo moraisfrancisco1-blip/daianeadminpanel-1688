@@ -5,6 +5,40 @@ import { requireAuth } from "../middleware/auth";
 import { eq } from "drizzle-orm";
 import { stripe } from "../services/stripe";
 
+// ── Timezone helpers (Europe/Amsterdam) ──────────────────────────────
+const AMS = "Europe/Amsterdam";
+
+function amsDateOf(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: AMS,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+function amsTodayStr(): string {
+  return amsDateOf(new Date());
+}
+
+/** Monday (YYYY-MM-DD) of the week containing the given YYYY-MM-DD date. */
+function mondayOf(dateStr: string): string {
+  const [y, mo, d] = dateStr.split("-").map(Number);
+  const day = new Date(y!, (mo ?? 1) - 1, d ?? 1).getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  const m = new Date(y!, (mo ?? 1) - 1, (d ?? 1) - diff);
+  return `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}-${String(m.getDate()).padStart(2, "0")}`;
+}
+
+function previousMonthKey(todayStr: string): string {
+  const [y, mo] = todayStr.split("-").map(Number);
+  const d = new Date(y!, (mo ?? 1) - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+const sumTotal = (rows: { total: number }[]): number =>
+  Number(rows.reduce((s, r) => s + r.total, 0).toFixed(2));
+
 export const dashboardRoute = new Hono()
   .get("/stats", requireAuth, async (c) => {
     const allInvoices = await db.select().from(invoices);
@@ -12,15 +46,34 @@ export const dashboardRoute = new Hono()
     const allBookings = await db.select().from(bookings);
 
     const now = new Date();
+    const today = amsTodayStr();
+    const monday = mondayOf(today);
+    const ym = today.slice(0, 7);
+    const yearStr = today.slice(0, 4);
+    const prevYm = previousMonthKey(today);
+
     const paid = allInvoices.filter((i) => i.status === "paid");
+    const paidWithAt = paid.filter((i) => i.paidAt);
     const overdue = allInvoices.filter((i) => i.status !== "paid" && i.status !== "cancelled" && i.dueDate < now);
     const pending = allInvoices.filter((i) => i.status !== "paid" && i.status !== "cancelled" && i.dueDate >= now);
 
-    const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const revenueThisMonth = paid.filter((i) => i.paidAt && i.paidAt >= thisMonth).reduce((s, i) => s + i.total, 0);
-    const totalRevenue = paid.reduce((s, i) => s + i.total, 0);
+    // Received (paid) per period — based on the actual paid date.
+    const revenueToday = sumTotal(paidWithAt.filter((i) => amsDateOf(i.paidAt!) === today));
+    const revenueThisWeek = sumTotal(
+      paidWithAt.filter((i) => {
+        const d = amsDateOf(i.paidAt!);
+        return d >= monday && d <= today;
+      }),
+    );
+    const revenueThisMonth = sumTotal(paidWithAt.filter((i) => amsDateOf(i.paidAt!).startsWith(ym)));
+    const revenueThisYear = sumTotal(paidWithAt.filter((i) => amsDateOf(i.paidAt!).startsWith(yearStr)));
+    const prevMonthRevenue = sumTotal(paidWithAt.filter((i) => amsDateOf(i.paidAt!).startsWith(prevYm)));
 
-    // Calculate net revenue (after Stripe fees) from balance transactions
+    // Billed vs received vs pending (this month).
+    const billedThisMonth = sumTotal(allInvoices.filter((i) => amsDateOf(i.issueDate).startsWith(ym)));
+    const pendingTotal = sumTotal([...overdue, ...pending]);
+
+    const totalRevenue = sumTotal(paid);
     let totalRevenueNet = totalRevenue;
     if (stripe) {
       try {
@@ -35,6 +88,10 @@ export const dashboardRoute = new Hono()
       }
     }
 
+    const activeSessions = allBookings.filter((b) => b.status === "confirmed" || b.status === "completed");
+    const sessionsThisMonth = activeSessions.filter((b) => b.date.startsWith(ym)).length;
+    const totalSessions = activeSessions.length;
+
     return c.json(
       {
         totalClients: allClients.length,
@@ -42,12 +99,19 @@ export const dashboardRoute = new Hono()
         paidCount: paid.length,
         overdueCount: overdue.length,
         pendingCount: pending.length,
-        revenueThisMonth: Number(revenueThisMonth.toFixed(2)),
+        revenueToday,
+        revenueThisWeek,
+        revenueThisMonth,
+        revenueThisYear,
+        prevMonthRevenue,
+        billedThisMonth,
+        paidThisMonth: revenueThisMonth,
+        pendingTotal,
         totalRevenue: Number(totalRevenueNet.toFixed(2)),
-        outstandingTotal: Number([...overdue, ...pending].reduce((s, i) => s + i.total, 0).toFixed(2)),
-        upcomingBookings: allBookings.filter(
-          (b) => b.status === "confirmed" && b.date >= now.toISOString().slice(0, 10),
-        ).length,
+        outstandingTotal: Number(pendingTotal.toFixed(2)),
+        sessionsThisMonth,
+        totalSessions,
+        upcomingBookings: allBookings.filter((b) => b.status === "confirmed" && b.date >= today).length,
       },
       200,
     );
@@ -274,4 +338,113 @@ export const dashboardRoute = new Hono()
       },
       200,
     );
+  })
+  .get("/today", requireAuth, async (c) => {
+    const today = amsTodayStr();
+    const todaysBookings = await db.select().from(bookings).where(eq(bookings.date, today));
+    todaysBookings.sort((a, b) => a.startTime.localeCompare(b.startTime));
+    const allServices = await db.select().from(services);
+    const serviceMap = new Map(allServices.map((s) => [s.id, s]));
+
+    const sessions = todaysBookings.map((b) => ({
+      id: b.id,
+      name: b.name,
+      startTime: b.startTime,
+      status: b.status,
+      serviceName: serviceMap.get(b.serviceId)?.name ?? "—",
+      durationMinutes: serviceMap.get(b.serviceId)?.durationMinutes ?? 60,
+      depositStatus: b.depositStatus,
+    }));
+
+    return c.json(
+      {
+        date: today,
+        sessions,
+        nextClient: sessions.find((s) => s.status === "confirmed") ?? null,
+        confirmedCount: sessions.filter((s) => s.status === "confirmed").length,
+        completedCount: sessions.filter((s) => s.status === "completed").length,
+        cancelledCount: sessions.filter((s) => s.status === "cancelled").length,
+      },
+      200,
+    );
+  })
+  .get("/alerts", requireAuth, async (c) => {
+    const now = new Date();
+    const today = amsTodayStr();
+    const allInvoices = await db.select().from(invoices);
+    const allClients = await db.select().from(clients);
+    const allBookings = await db.select().from(bookings);
+    const allServices = await db.select().from(services);
+    const clientMap = new Map(allClients.map((cl) => [cl.id, cl.name]));
+    const serviceMap = new Map(allServices.map((s) => [s.id, s.name]));
+
+    type Alert = { id: string; severity: "high" | "medium" | "info"; title: string; detail: string; link: string };
+    const alerts: Alert[] = [];
+
+    // 1. Overdue invoices (high)
+    for (const inv of allInvoices) {
+      if (inv.status !== "paid" && inv.status !== "cancelled" && inv.dueDate < now) {
+        alerts.push({
+          id: `overdue-${inv.id}`,
+          severity: "high",
+          title: `Invoice vencida · ${inv.invoiceNumber}`,
+          detail: `${clientMap.get(inv.clientId) ?? "Cliente"} · €${inv.total.toFixed(2)} · venceu a ${amsDateOf(inv.dueDate)}`,
+          link: "/invoices",
+        });
+      }
+    }
+
+    // 2. Sent (pending payment) invoices (medium)
+    for (const inv of allInvoices) {
+      if (inv.status === "sent") {
+        alerts.push({
+          id: `pending-${inv.id}`,
+          severity: "medium",
+          title: `Pagamento pendente · ${inv.invoiceNumber}`,
+          detail: `${clientMap.get(inv.clientId) ?? "Cliente"} · €${inv.total.toFixed(2)} · vence a ${amsDateOf(inv.dueDate)}`,
+          link: "/invoices",
+        });
+      }
+    }
+
+    // 3. Today's confirmed sessions (info)
+    for (const b of allBookings) {
+      if (b.date === today && b.status === "confirmed") {
+        alerts.push({
+          id: `today-${b.id}`,
+          severity: "info",
+          title: `Sessão hoje · ${b.name}`,
+          detail: `${b.startTime} · ${serviceMap.get(b.serviceId) ?? "—"}`,
+          link: "/bookings",
+        });
+      }
+    }
+
+    // 4. Clients without a session in the last 60 days (medium)
+    const DAYS = 60;
+    const cutoff = new Date(now.getTime() - DAYS * 24 * 60 * 60 * 1000);
+    const lastBookingByClient = new Map<number, Date>();
+    for (const b of allBookings) {
+      if (b.clientId == null) continue;
+      if (b.status !== "confirmed" && b.status !== "completed") continue;
+      const bDate = new Date(b.date + "T00:00:00");
+      const cur = lastBookingByClient.get(b.clientId);
+      if (!cur || bDate > cur) lastBookingByClient.set(b.clientId, bDate);
+    }
+    for (const cl of allClients) {
+      const last = lastBookingByClient.get(cl.id);
+      if (last && last < cutoff) {
+        alerts.push({
+          id: `inactive-${cl.id}`,
+          severity: "medium",
+          title: `Cliente sem sessão · ${cl.name}`,
+          detail: `Última sessão a ${amsDateOf(last)}`,
+          link: "/clients",
+        });
+      }
+    }
+
+    const order: Record<Alert["severity"], number> = { high: 0, medium: 1, info: 2 };
+    alerts.sort((a, b) => order[a.severity] - order[b.severity]);
+    return c.json({ alerts: alerts.slice(0, 8) }, 200);
   });

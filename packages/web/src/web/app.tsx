@@ -2,6 +2,7 @@ import { Route, Switch } from "wouter";
 import Index from "./pages/index";
 import LoginPage from "./pages/login";
 import ClientsPage from "./pages/clients";
+import ClientDetailPage from "./pages/client-detail";
 import CatalogPage from "./pages/catalog";
 import QuotesPage from "./pages/quotes";
 import InvoicesPage from "./pages/invoices";
@@ -9,6 +10,10 @@ import BookingsPage from "./pages/bookings";
 import BookingManualPage from "./pages/booking-manual";
 import RemindersPage from "./pages/reminders";
 import ExportsPage from "./pages/exports";
+import ReportsPage from "./pages/reports";
+import CalendarPage from "./pages/calendar";
+import MessagesPage from "./pages/messages";
+import PackagesPage from "./pages/packages";
 import BookPage from "./pages/book";
 import { Provider } from "./components/provider";
 import { AgentFeedback } from "@runablehq/website-runtime";
@@ -20,12 +25,17 @@ function App() {
         <Route path="/" component={Index} />
         <Route path="/login" component={LoginPage} />
         <Route path="/clients" component={ClientsPage} />
+        <Route path="/clients/:id" component={ClientDetailPage} />
         <Route path="/catalog" component={CatalogPage} />
         <Route path="/quotes" component={QuotesPage} />
         <Route path="/invoices" component={InvoicesPage} />
+        <Route path="/calendar" component={CalendarPage} />
         <Route path="/bookings" component={BookingsPage} />
         <Route path="/bookings/manual" component={BookingManualPage} />
         <Route path="/reminders" component={RemindersPage} />
+        <Route path="/reports" component={ReportsPage} />
+        <Route path="/messages" component={MessagesPage} />
+        <Route path="/packages" component={PackagesPage} />
         <Route path="/exports" component={ExportsPage} />
         <Route path="/book" component={BookPage} />
         <Route path="/book/confirmed" component={BookConfirmedPage} />

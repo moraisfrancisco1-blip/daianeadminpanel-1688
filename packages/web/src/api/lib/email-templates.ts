@@ -322,3 +322,12 @@ export function buildAdminInvoicePaidHtml(opts: {
     </p>
   `);
 }
+
+export function buildRebookReminderEmailHtml(opts: { name: string }) {
+  return wrapper(`
+    <h2 style="color:${TEAL};font-size:20px;margin:0 0 12px;">Olá ${opts.name} 👋</h2>
+    <p style="margin:0 0 12px;">Já passou algum tempo desde a sua última sessão. Como se tem sentido?</p>
+    <p style="margin:0 0 16px;">Se quiser, podemos marcar a sua próxima sessão. Responda a este email ou visite o site para escolher o melhor horário.</p>
+    <a href="https://daianeoakes.com" style="display:inline-block;background:${COPPER};color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:500;">Marcar sessão</a>
+  `);
+}

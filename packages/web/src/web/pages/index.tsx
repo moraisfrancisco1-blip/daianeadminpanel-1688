@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
 import { useState } from "react";
+import { StatusPill } from "../components/status-pill";
 
 export default function DashboardPage() {
   return (
@@ -75,6 +76,14 @@ function DashboardContent() {
     queryFn: async (): Promise<any> => (await api.dashboard["stripe-commissions"].$get({ query: { year: String(activeMonth.year), month: String(activeMonth.month) } })).json(),
     refetchInterval: 60000,
   });
+  const todayData = useQuery({
+    queryKey: ["dashboard-today"],
+    queryFn: async (): Promise<any> => (await api.dashboard.today.$get()).json(),
+  });
+  const alertsData = useQuery({
+    queryKey: ["dashboard-alerts"],
+    queryFn: async (): Promise<any> => (await api.dashboard.alerts.$get()).json(),
+  });
 
   // best-effort trigger of overdue reminder check on load (fallback automation)
   useQuery({
@@ -125,6 +134,49 @@ function DashboardContent() {
         </div>
       </div>
 
+      {/* O meu dia — today's focus */}
+      <div className="bg-card border border-border rounded-xl p-6">
+        <h3 className="font-medium mb-4 flex items-center gap-2">
+          <CalendarClock className="size-4 text-brand-copper" />
+          O meu dia
+          {todayData.data?.date && (
+            <span className="text-xs font-normal text-muted-foreground">
+              · {new Date(todayData.data.date + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+            </span>
+          )}
+        </h3>
+        {todayData.isLoading ? (
+          <div className="h-24 bg-muted rounded animate-pulse" />
+        ) : (
+          <div className="space-y-2">
+            {(todayData.data?.sessions ?? []).map((s: any) => (
+              <div key={s.id} className="flex items-center justify-between text-sm gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {s.startTime} · {s.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {s.serviceName} ({s.durationMinutes} min)
+                  </p>
+                </div>
+                <StatusPill status={s.status} />
+              </div>
+            ))}
+            {(todayData.data?.sessions ?? []).length === 0 && (
+              <p className="text-sm text-muted-foreground">Sem sessões hoje.</p>
+            )}
+            {todayData.data?.nextClient && (
+              <div className="mt-3 pt-3 border-t border-border text-sm">
+                <p className="text-xs text-muted-foreground">Próximo cliente</p>
+                <p className="font-medium">
+                  {todayData.data.nextClient.startTime} · {todayData.data.nextClient.name} — {todayData.data.nextClient.serviceName}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Stat cards */}
       {stats.isLoading ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -147,6 +199,67 @@ function DashboardContent() {
           />
           <StatCard icon={AlertTriangle} label="Overdue invoices" value={stats.data?.overdueCount ?? 0} tone="danger" />
           <StatCard icon={Receipt} label="Outstanding total" value={`€${(stats.data?.outstandingTotal ?? 0).toFixed(2)}`} />
+        </div>
+      )}
+
+      {/* Financial summary — faturado vs recebido vs pendente */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard icon={Euro} label="Recebido hoje" value={`€${(stats.data?.revenueToday ?? 0).toFixed(2)}`} />
+        <StatCard icon={Euro} label="Recebido esta semana" value={`€${(stats.data?.revenueThisWeek ?? 0).toFixed(2)}`} />
+        <StatCard icon={Euro} label="Recebido este ano" value={`€${(stats.data?.revenueThisYear ?? 0).toFixed(2)}`} />
+        <StatCard
+          icon={TrendingUp}
+          label="Sessões (mês / total)"
+          value={`${stats.data?.sessionsThisMonth ?? 0} / ${stats.data?.totalSessions ?? 0}`}
+        />
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-6">
+        <h3 className="font-medium mb-4">Este mês — faturado vs recebido vs pendente</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <p className="text-xs text-muted-foreground">Faturado (emitido)</p>
+            <p className="text-2xl font-display font-semibold">€{(stats.data?.billedThisMonth ?? 0).toFixed(2)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Recebido</p>
+            <p className="text-2xl font-display font-semibold text-[#4C7A56]">€{(stats.data?.paidThisMonth ?? 0).toFixed(2)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Pendente (em aberto)</p>
+            <p className="text-2xl font-display font-semibold text-brand-copper">€{(stats.data?.pendingTotal ?? 0).toFixed(2)}</p>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-3">
+          Mês passado: €{(stats.data?.prevMonthRevenue ?? 0).toFixed(2)} recebidos.
+        </p>
+      </div>
+
+      {/* Alertas inteligentes */}
+      {(alertsData.data?.alerts ?? []).length > 0 && (
+        <div className="bg-card border border-border rounded-xl p-6">
+          <h3 className="font-medium mb-4 flex items-center gap-2">
+            <AlertTriangle className="size-4 text-brand-copper" /> Alertas
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {(alertsData.data?.alerts ?? []).map((a: any) => (
+              <Link
+                key={a.id}
+                to={a.link}
+                className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 hover:bg-accent/40 transition-colors"
+              >
+                <span
+                  className={`mt-1.5 size-2 rounded-full shrink-0 ${
+                    a.severity === "high" ? "bg-destructive" : a.severity === "medium" ? "bg-brand-bronze" : "bg-brand-teal"
+                  }`}
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{a.title}</p>
+                  <p className="text-xs text-muted-foreground truncate">{a.detail}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
 

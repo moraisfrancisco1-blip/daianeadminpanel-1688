@@ -150,7 +150,48 @@ export const bookings = sqliteTable("bookings", {
   reminder2dSentAt: integer("reminder_2d_sent_at", { mode: "timestamp" }), // "session in 2 days" reminder sent
   reminder1dSentAt: integer("reminder_1d_sent_at", { mode: "timestamp" }), // "session tomorrow" reminder sent
   remainderEmailSentAt: integer("remainder_email_sent_at", { mode: "timestamp" }), // "pay remainder" email sent (10 min before end)
+  rebookReminderSentAt: integer("rebook_reminder_sent_at", { mode: "timestamp" }), // "come back and rebook" email sent
   createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+// One-off blocked time slots (specific dates/times marked unavailable by the admin).
+export const blockedSlots = sqliteTable("blocked_slots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  date: text("date").notNull(), // YYYY-MM-DD
+  startTime: text("start_time").notNull(), // HH:MM
+  endTime: text("end_time").notNull(), // HH:MM
+  reason: text("reason"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+// Prepaid session packages (credits) assigned to a client.
+export const packages = sqliteTable("packages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  clientId: integer("client_id").notNull(),
+  name: text("name").notNull(), // e.g. "Pacote 5 sessões"
+  totalSessions: integer("total_sessions").notNull(),
+  sessionsUsed: integer("sessions_used").notNull().default(0),
+  price: real("price").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  purchasedAt: integer("purchased_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  notes: text("notes"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const packageUsages = sqliteTable("package_usages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  packageId: integer("package_id").notNull(),
+  bookingId: integer("booking_id"),
+  sessions: integer("sessions").notNull().default(1),
+  usedAt: integer("used_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
 });

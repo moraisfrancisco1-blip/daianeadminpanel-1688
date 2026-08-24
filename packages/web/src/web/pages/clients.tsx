@@ -4,6 +4,7 @@ import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Plus, Search, Mail, Phone, X, Pencil, Trash2 } from "lucide-react";
+import { Link } from "wouter";
 
 export default function ClientsPage() {
   return (
@@ -110,7 +111,11 @@ function ClientsContent() {
             <tbody>
               {filtered.map((c: any) => (
                 <tr key={c.id} className="border-t border-border hover:bg-accent/40 transition-colors">
-                  <td className="px-4 py-3 font-medium">{c.name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    <Link to={`/clients/${c.id}`} className="hover:text-primary hover:underline">
+                      {c.name}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     <div className="flex flex-col gap-0.5">
                       {c.email && (

@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { db } from "../database";
 import { invoices, clients, bookings } from "../database/schema";
-import { eq, and, lt, ne, isNull, inArray } from "drizzle-orm";
+import { eq, and, lt, ne, isNull, inArray, gt } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { sendEmail } from "../services/email";
-import { buildReminderEmailHtml, buildPostSessionEmailHtml, buildSessionReminderEmailHtml } from "../lib/email-templates";
+import { buildReminderEmailHtml, buildPostSessionEmailHtml, buildSessionReminderEmailHtml, buildRebookReminderEmailHtml } from "../lib/email-templates";
 import { COMPANY } from "../lib/company";
 import { services } from "../database/schema";
 
@@ -152,6 +152,42 @@ async function runSessionReminderCheck() {
   return sent;
 }
 
+/**
+ * Sends a "come back and rebook" email to clients whose last completed session
+ * was REBOOK_DAYS ago and who have no upcoming confirmed booking.
+ */
+async function runRebookReminderCheck() {
+  const REBOOK_DAYS = 28;
+  const targetDate = amsterdamDateStrPlusDays(-REBOOK_DAYS);
+
+  const candidates = await db
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.status, "completed"), eq(bookings.date, targetDate), isNull(bookings.rebookReminderSentAt)));
+
+  const sent: number[] = [];
+  for (const b of candidates) {
+    if (!b.email) continue;
+
+    const upcoming = await db
+      .select()
+      .from(bookings)
+      .where(and(eq(bookings.email, b.email), eq(bookings.status, "confirmed"), gt(bookings.date, b.date)));
+    if (upcoming.length > 0) continue;
+
+    await sendEmail({
+      to: b.email,
+      subject: "Let's schedule your next session ✨",
+      html: buildRebookReminderEmailHtml({ name: b.name }),
+    });
+
+    await db.update(bookings).set({ rebookReminderSentAt: new Date() }).where(eq(bookings.id, b.id));
+    sent.push(b.id);
+  }
+
+  return sent;
+}
+
 async function runReminderCheck() {
   const now = new Date();
   const cutoff = new Date(now.getTime() - REMINDER_DAYS_AFTER_DUE * 24 * 60 * 60 * 1000);
@@ -197,7 +233,8 @@ export const remindersRoute = new Hono()
     const sent = await runReminderCheck();
     const postSession = await runPostSessionEmails();
     const sessionReminders = await runSessionReminderCheck();
-    return c.json({ sent, postSession, sessionReminders }, 200);
+    const rebook = await runRebookReminderCheck();
+    return c.json({ sent, postSession, sessionReminders, rebook }, 200);
   })
   // Send the post-session review/promo email immediately for one booking.
   .post("/post-session/:bookingId/send-now", requireAuth, async (c) => {
