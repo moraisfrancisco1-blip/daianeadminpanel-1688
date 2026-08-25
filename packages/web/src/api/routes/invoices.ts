@@ -75,6 +75,9 @@ async function getOrCreateCheckoutUrl(invoice: any, client: any, origin: string)
     cancel_url: `${origin}/invoices`,
     customer: customerId,
     metadata,
+    // Propagate metadata to the PaymentIntent so payment_intent.succeeded can also
+    // identify the Admin invoice (Checkout Session metadata is NOT copied automatically).
+    payment_intent_data: { metadata },
   });
 
   await db.update(invoices).set({ stripeCheckoutSessionId: session.id }).where(eq(invoices.id, invoice.id));
