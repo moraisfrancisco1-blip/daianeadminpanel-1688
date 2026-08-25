@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Link, useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send } from "lucide-react";
 
 type BookingItem = {
   id: number;
@@ -488,9 +488,51 @@ function BookingDetailModal(props: {
   const [date, setDate] = useState(booking.date);
   const [startTime, setStartTime] = useState(booking.startTime);
   const [status, setStatus] = useState(booking.status);
+  const [paymentLinkOpen, setPaymentLinkOpen] = useState(false);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+
+  const invoiceQ = useQuery({
+    queryKey: ["invoice", booking.invoiceId],
+    queryFn: async () => {
+      if (!booking.invoiceId) return null;
+      const res = await fetch(`/api/invoices/${booking.invoiceId}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.invoice as { id: number; invoiceNumber: string; status: string; total: number };
+    },
+    enabled: !!booking.invoiceId,
+  });
+
+  async function requestPaymentLink() {
+    if (!booking.invoiceId) return;
+    setCheckoutUrl(null);
+    setCheckoutLoading(true);
+    setPaymentLinkOpen(true);
+    try {
+      const res = await fetch(`/api/invoices/${booking.invoiceId}/checkout`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to create payment link");
+      setCheckoutUrl((data as { checkoutUrl?: string })?.checkoutUrl ?? null);
+    } catch {
+      setCheckoutUrl(null);
+    } finally {
+      setCheckoutLoading(false);
+    }
+  }
+
+  async function emailPaymentLink() {
+    if (!booking.invoiceId) return;
+    try {
+      await fetch(`/api/invoices/${booking.invoiceId}/send`, { method: "POST" });
+    } finally {
+      setPaymentLinkOpen(false);
+    }
+  }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <>
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-card rounded-xl p-6 w-full max-w-md space-y-4 relative max-h-[90vh] overflow-y-auto">
         <button onClick={onClose} className="absolute top-4 right-4 text-muted-foreground">
           <X className="size-4" />
@@ -525,6 +567,16 @@ function BookingDetailModal(props: {
             </p>
           </div>
         </div>
+
+        {invoiceQ.data && invoiceQ.data.status !== "paid" && invoiceQ.data.status !== "cancelled" && (
+          <button
+            type="button"
+            onClick={requestPaymentLink}
+            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
+          >
+            <Link2 className="size-4" /> Send Payment Link · Invoice {invoiceQ.data.invoiceNumber}
+          </button>
+        )}
 
         <div className="border-t pt-4 space-y-3">
           <h3 className="text-sm font-medium">Editar / reagendar</h3>
@@ -606,7 +658,59 @@ function BookingDetailModal(props: {
           </button>
         </div>
       </div>
-    </div>
+      </div>
+
+      {paymentLinkOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+          <div className="bg-card rounded-xl p-6 w-full max-w-md space-y-4 relative">
+            <button onClick={() => setPaymentLinkOpen(false)} className="absolute top-4 right-4 text-muted-foreground">
+              <X className="size-4" />
+            </button>
+            <h2 className="font-display text-xl font-semibold">Send Payment Link</h2>
+            <p className="text-sm text-muted-foreground">
+              Invoice <strong>{invoiceQ.data?.invoiceNumber}</strong> — €{(invoiceQ.data?.total ?? 0).toFixed(2)}
+            </p>
+
+            {checkoutLoading ? (
+              <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Creating payment link…
+              </div>
+            ) : checkoutUrl ? (
+              <div className="space-y-2">
+                <input
+                  readOnly
+                  value={checkoutUrl}
+                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-xs"
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(checkoutUrl)}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
+                  >
+                    <Copy className="size-4" /> Copy link
+                  </button>
+                  <button
+                    onClick={() => window.open(checkoutUrl, "_blank")}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
+                  >
+                    <ExternalLink className="size-4" /> Open link
+                  </button>
+                </div>
+                <button
+                  onClick={emailPaymentLink}
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:opacity-90"
+                >
+                  <Send className="size-4" /> Send via email
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Could not create a payment link.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

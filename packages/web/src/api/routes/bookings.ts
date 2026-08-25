@@ -419,79 +419,43 @@ export const bookingsRoute = new Hono()
     // Determine if this is truly a full payment or just a deposit
     const isFullPayment = booking!.depositAmount >= service.price;
 
-    // Create an Admin invoice for the deposit, then a Checkout Session for that invoice
-    // (Admin = source of truth; Stripe = payment processor only).
-    let checkoutUrl: string | null = null;
-    if (booking!.depositAmount > 0 && stripe) {
-      try {
-        const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
-        const vatRate = service.vatRate;
-        const { net, vat } = computeVat(booking!.depositAmount, vatRate);
-        const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
-        const issueDate = new Date();
-        const dueDate = new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+    // Create an Admin invoice for the deposit (Admin = source of truth).
+    // No Stripe Checkout Session is created here — the admin sends the payment
+    // link later from the invoice or the booking detail.
+    if (booking!.depositAmount > 0) {
+      const vatRate = service.vatRate;
+      const { net, vat } = computeVat(booking!.depositAmount, vatRate);
+      const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
+      const issueDate = new Date();
+      const dueDate = new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
 
-        const [invoice] = await db
-          .insert(invoices)
-          .values({
-            invoiceNumber,
-            clientId: client!.id,
-            bookingId: booking!.id,
-            status: "sent",
-            issueDate,
-            dueDate,
-            notes: `Booking deposit — ${service.name}`,
-            subtotal: net,
-            vatTotal: vat,
-            total: booking!.depositAmount,
-          })
-          .returning();
+      const [invoice] = await db
+        .insert(invoices)
+        .values({
+          invoiceNumber,
+          clientId: client!.id,
+          bookingId: booking!.id,
+          status: "sent",
+          issueDate,
+          dueDate,
+          notes: `Booking deposit — ${service.name}`,
+          subtotal: net,
+          vatTotal: vat,
+          total: booking!.depositAmount,
+        })
+        .returning();
 
-        await db.insert(invoiceItems).values({
-          invoiceId: invoice!.id,
-          serviceId: service.id,
-          description: `${service.name} — booking deposit`,
-          quantity: 1,
-          unitPrice: net,
-          vatRate,
-          amount: net,
-        });
+      await db.insert(invoiceItems).values({
+        invoiceId: invoice!.id,
+        serviceId: service.id,
+        description: `${service.name} — booking deposit`,
+        quantity: 1,
+        unitPrice: net,
+        vatRate,
+        amount: net,
+      });
 
-        const customer = client!.stripeCustomerId
-          ? { customer: client!.stripeCustomerId }
-          : { customer_email: booking!.email };
-
-        const session = await stripe.checkout.sessions.create({
-          mode: "payment",
-          ...customer,
-          line_items: [
-            {
-              price_data: {
-                currency: "eur",
-                product_data: { name: `Invoice ${invoiceNumber}` },
-                unit_amount: Math.round(booking!.depositAmount * 100),
-              },
-              quantity: 1,
-            },
-          ],
-          success_url: `${origin}/book/confirmed?booking=${booking!.id}`,
-          cancel_url: `${origin}/bookings`,
-          metadata: {
-            adminInvoiceId: String(invoice!.id),
-            invoiceNumber,
-            clientId: String(client!.id),
-            bookingId: String(booking!.id),
-          },
-        });
-        checkoutUrl = session.url;
-        await db.update(invoices).set({ stripeCheckoutSessionId: session.id }).where(eq(invoices.id, invoice!.id));
-        await db
-          .update(bookings)
-          .set({ stripeCheckoutSessionId: session.id, invoiceId: invoice!.id })
-          .where(eq(bookings.id, booking!.id));
-      } catch (err) {
-        console.error("[bookings/manual] failed to create invoice + Stripe checkout for deposit", err);
-      }
+      await db.update(bookings).set({ invoiceId: invoice!.id }).where(eq(bookings.id, booking!.id));
     }
 
     // Send confirmation emails
@@ -509,7 +473,7 @@ export const bookingsRoute = new Hono()
         paymentMethod: booking!.paymentMethod,
         payFullNow: isFullPayment,
         servicePrice: service.price,
-        checkoutUrl,
+        checkoutUrl: null,
       }),
     });
 
