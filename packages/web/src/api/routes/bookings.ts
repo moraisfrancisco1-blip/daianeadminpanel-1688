@@ -419,12 +419,15 @@ export const bookingsRoute = new Hono()
     // Determine if this is truly a full payment or just a deposit
     const isFullPayment = booking!.depositAmount >= service.price;
 
-    // Create an Admin invoice for the deposit (Admin = source of truth).
+    // Create an Admin invoice for the amount the client still owes
+    // (service price minus any deposit already accounted for).
     // No Stripe Checkout Session is created here — the admin sends the payment
     // link later from the invoice or the booking detail.
-    if (booking!.depositAmount > 0) {
+    const deposit = booking!.depositAmount || 0;
+    const pendingAmount = Number((service.price - deposit).toFixed(2));
+    if (pendingAmount > 0) {
       const vatRate = service.vatRate;
-      const { net, vat } = computeVat(booking!.depositAmount, vatRate);
+      const { net, vat } = computeVat(pendingAmount, vatRate);
       const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
       const issueDate = new Date();
       const dueDate = new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
@@ -438,17 +441,17 @@ export const bookingsRoute = new Hono()
           status: "sent",
           issueDate,
           dueDate,
-          notes: `Booking deposit — ${service.name}`,
+          notes: `Booking payment — ${service.name}`,
           subtotal: net,
           vatTotal: vat,
-          total: booking!.depositAmount,
+          total: pendingAmount,
         })
         .returning();
 
       await db.insert(invoiceItems).values({
         invoiceId: invoice!.id,
         serviceId: service.id,
-        description: `${service.name} — booking deposit`,
+        description: `${service.name} — booking payment`,
         quantity: 1,
         unitPrice: net,
         vatRate,

@@ -89,7 +89,10 @@ function CalendarContent() {
   const qc = useQueryClient();
   const [, navigateTo] = useLocation();
   const [view, setView] = useState<"day" | "week" | "month">("week");
-  const [cursor, setCursor] = useState(() => new Date());
+  const initialDateParam = new URLSearchParams(window.location.search).get("date");
+  const [cursor, setCursor] = useState(() =>
+    initialDateParam ? new Date(`${initialDateParam}T12:00:00`) : new Date(),
+  );
   const [selectedBooking, setSelectedBooking] = useState<BookingItem | null>(null);
   const [showBlockModal, setShowBlockModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -105,8 +108,9 @@ function CalendarContent() {
     refetchOnMount: "always",
     queryFn: async (): Promise<BookingItem[]> => {
       const res = await api.bookings.$get();
-      const data = (await res.json()) as { bookings: BookingItem[] };
-      return data.bookings;
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to load bookings");
+      return (data as { bookings: BookingItem[] }).bookings;
     },
   });
 
@@ -116,8 +120,9 @@ function CalendarContent() {
     refetchOnMount: "always",
     queryFn: async (): Promise<Service[]> => {
       const res = await api.services.$get();
-      const data = (await res.json()) as { services: Service[] };
-      return data.services;
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to load services");
+      return (data as { services: Service[] }).services;
     },
   });
 
@@ -138,8 +143,9 @@ function CalendarContent() {
     refetchOnMount: "always",
     queryFn: async (): Promise<BlockedSlot[]> => {
       const res = await api.bookings.blocked.$get({ query: { from: range.from, to: range.to } });
-      const data = (await res.json()) as { blocked: BlockedSlot[] };
-      return data.blocked;
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to load blocked slots");
+      return (data as { blocked: BlockedSlot[] }).blocked;
     },
   });
 
@@ -568,16 +574,6 @@ function BookingDetailModal(props: {
           </div>
         </div>
 
-        {invoiceQ.data && invoiceQ.data.status !== "paid" && invoiceQ.data.status !== "cancelled" && (
-          <button
-            type="button"
-            onClick={requestPaymentLink}
-            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
-          >
-            <Link2 className="size-4" /> Send Payment Link · Invoice {invoiceQ.data.invoiceNumber}
-          </button>
-        )}
-
         <div className="border-t pt-4 space-y-3">
           <h3 className="text-sm font-medium">Editar / reagendar</h3>
           <input
@@ -637,6 +633,18 @@ function BookingDetailModal(props: {
             <option value="no_show">Não compareceu</option>
           </select>
         </div>
+
+        {invoiceQ.data && invoiceQ.data.status !== "paid" && invoiceQ.data.status !== "cancelled" && (
+          <div className="border-t pt-3">
+            <button
+              type="button"
+              onClick={requestPaymentLink}
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
+            >
+              <Link2 className="size-4" /> Send Payment Link · Invoice {invoiceQ.data.invoiceNumber}
+            </button>
+          </div>
+        )}
 
         <div className="flex gap-3 pt-2">
           <button

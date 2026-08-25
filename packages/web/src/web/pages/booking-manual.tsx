@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { normalize, idFromQuery } from "../lib/list";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { ArrowLeft, Loader2, Calendar, Clock, User, Mail, Phone, FileText, Search, UserPlus, AlertTriangle, X } from "lucide-react";
 
 type ClientSuggestion = { id: number; name: string; email: string | null; phone: string | null };
@@ -18,6 +18,7 @@ export default function BookingManualPage() {
 
 function BookingManualContent() {
   const qc = useQueryClient();
+  const [, navigate] = useLocation();
   const [toast, setToast] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [duplicateWarning, setDuplicateWarning] = useState<ClientSuggestion[] | null>(null);
@@ -93,7 +94,7 @@ function BookingManualContent() {
       if (!response.ok) throw new Error((json as { message?: string })?.message ?? "Failed to create booking");
       return json;
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["bookings"] });
       qc.invalidateQueries({ queryKey: ["blocked"] });
       setToast("Booking created successfully!");
@@ -112,6 +113,11 @@ function BookingManualContent() {
         paymentMethod: "",
         notes: "",
       });
+      // Return to the Agenda (same week/date) when the form was opened from a double-click.
+      if (initialDate) {
+        const createdDate = (data as any)?.booking?.date || initialDate;
+        navigate(`/calendar?date=${createdDate}`);
+      }
     },
     onError: (error) => {
       setToast(error instanceof Error ? error.message : "Error creating booking. Please try again.");
