@@ -47,6 +47,7 @@ interface InvoiceRow {
   issueDate: string;
   stripePaymentIntentId: string | null;
   stripeCheckoutSessionId: string | null;
+  isTest: boolean;
 }
 
 type InvoiceSortKey = "number" | "client" | "date" | "total" | "status";
@@ -63,6 +64,7 @@ function InvoicesContent() {
   const [editId, setEditId] = useState<number | null>(null);
   const [clientId, setClientId] = useState<number | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [isTest, setIsTest] = useState(false);
   const [items, setItems] = useState<LineItemDraft[]>([{ description: "", quantity: 1, unitPrice: 0, vatRate: 0.09 }]);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const qc = useQueryClient();
@@ -135,7 +137,7 @@ function InvoicesContent() {
 
   const createInvoice = useMutation({
     mutationFn: async () => {
-      const res = await api.invoices.$post({ json: { clientId, items } });
+      const res = await api.invoices.$post({ json: { clientId, items, isTest } });
       return await res.json();
     },
     onSuccess: () => {
@@ -218,6 +220,7 @@ function InvoicesContent() {
   function resetForm() {
     setClientId(null);
     setInvoiceNumber("");
+    setIsTest(false);
     setItems([{ description: "", quantity: 1, unitPrice: 0, vatRate: 0.09 }]);
   }
 
@@ -321,7 +324,12 @@ function InvoicesContent() {
                 const isExact = exactId !== null && inv.id === exactId;
                 return (
                 <tr key={inv.id} className={`border-t border-border hover:bg-accent/40 transition-colors ${isExact ? "bg-primary/10" : ""}`}>
-                  <td className="px-4 py-3 font-medium">{inv.invoiceNumber}</td>
+                  <td className="px-4 py-3 font-medium">
+                    {inv.invoiceNumber}
+                    {inv.isTest && (
+                      <span className="ml-2 inline-block text-[10px] bg-amber-500 text-white rounded px-1 align-middle">TEST</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">{inv.clientName ?? "—"}</td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {new Date(inv.issueDate).toLocaleDateString("en-GB")}
@@ -443,6 +451,14 @@ function InvoicesContent() {
                 </option>
               ))}
             </select>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={isTest}
+                onChange={(e) => setIsTest(e.target.checked)}
+              />
+              Test invoice (uses TEST- numbering, does not consume official numbering)
+            </label>
             <LineItemEditor items={items} onChange={setItems} services={services} />
             <Button
               className="w-full"

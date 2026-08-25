@@ -4,7 +4,7 @@ import { invoices, invoiceItems, clients, payments } from "../database/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { computeTotals, vatBreakdownFromNet } from "../lib/totals";
-import { nextNumber } from "../lib/counters";
+import { nextNumber, nextTestNumber } from "../lib/counters";
 import { generateInvoicePdf } from "../lib/invoice-pdf";
 import { buildInvoiceEmailHtml, buildAdminInvoicePaidHtml } from "../lib/email-templates";
 import { sendEmail } from "../services/email";
@@ -98,6 +98,7 @@ export const invoicesRoute = new Hono()
         clientEmail: clients.email,
         stripePaymentIntentId: invoices.stripePaymentIntentId,
         stripeCheckoutSessionId: invoices.stripeCheckoutSessionId,
+        isTest: invoices.isTest,
       })
       .from(invoices)
       .leftJoin(clients, eq(invoices.clientId, clients.id))
@@ -116,7 +117,10 @@ export const invoicesRoute = new Hono()
   .post("/", requireAuth, async (c) => {
     const body = await c.req.json();
     const { lineItems, subtotal, vatTotal, total } = computeTotals(body.items);
-    const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
+    const isTest = !!body.isTest;
+    const invoiceNumber = isTest
+      ? await nextTestNumber()
+      : await nextNumber("invoice", new Date().getFullYear());
     const issueDate = new Date();
     const dueDate = body.dueDate
       ? new Date(body.dueDate)
@@ -130,6 +134,7 @@ export const invoicesRoute = new Hono()
         invoiceNumber,
         clientId: body.clientId,
         status: "draft",
+        isTest,
         issueDate,
         dueDate,
         notes: body.notes ?? null,

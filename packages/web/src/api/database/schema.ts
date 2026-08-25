@@ -76,6 +76,7 @@ export const invoices = sqliteTable("invoices", {
   quoteId: integer("quote_id"),
   bookingId: integer("booking_id"),
   status: text("status").notNull().default("draft"), // draft, sent, paid, overdue, cancelled
+  isTest: integer("is_test", { mode: "boolean" }).notNull().default(false),
   issueDate: integer("issue_date", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
