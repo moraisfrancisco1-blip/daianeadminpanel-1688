@@ -7,6 +7,7 @@ import { stripe } from "../services/stripe";
 import { sendEmail } from "../services/email";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildRemainderPaymentEmailHtml } from "../lib/email-templates";
 import { nextNumber } from "../lib/counters";
+import { computeVat } from "../lib/totals";
 import { COMPANY } from "../lib/company";
 import { createCalendarEvent, getGoogleBusyIntervals, deleteCalendarEvent, updateCalendarEvent } from "../services/google-calendar";
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
@@ -418,20 +419,56 @@ export const bookingsRoute = new Hono()
     // Determine if this is truly a full payment or just a deposit
     const isFullPayment = booking!.depositAmount >= service.price;
 
-    // If deposit is unpaid, create a Stripe checkout session for the deposit
+    // Create an Admin invoice for the deposit, then a Checkout Session for that invoice
+    // (Admin = source of truth; Stripe = payment processor only).
     let checkoutUrl: string | null = null;
-    if (booking!.depositStatus === "unpaid" && booking!.depositAmount > 0 && stripe) {
+    if (booking!.depositAmount > 0 && stripe) {
       try {
         const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
+        const vatRate = service.vatRate;
+        const { net, vat } = computeVat(booking!.depositAmount, vatRate);
+        const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
+        const issueDate = new Date();
+        const dueDate = new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+        const [invoice] = await db
+          .insert(invoices)
+          .values({
+            invoiceNumber,
+            clientId: client!.id,
+            bookingId: booking!.id,
+            status: "sent",
+            issueDate,
+            dueDate,
+            notes: `Booking deposit — ${service.name}`,
+            subtotal: net,
+            vatTotal: vat,
+            total: booking!.depositAmount,
+          })
+          .returning();
+
+        await db.insert(invoiceItems).values({
+          invoiceId: invoice!.id,
+          serviceId: service.id,
+          description: `${service.name} — booking deposit`,
+          quantity: 1,
+          unitPrice: net,
+          vatRate,
+          amount: net,
+        });
+
+        const customer = client!.stripeCustomerId
+          ? { customer: client!.stripeCustomerId }
+          : { customer_email: booking!.email };
+
         const session = await stripe.checkout.sessions.create({
           mode: "payment",
+          ...customer,
           line_items: [
             {
               price_data: {
                 currency: "eur",
-                product_data: {
-                  name: `${service.name} — booking deposit`,
-                },
+                product_data: { name: `Invoice ${invoiceNumber}` },
                 unit_amount: Math.round(booking!.depositAmount * 100),
               },
               quantity: 1,
@@ -439,15 +476,21 @@ export const bookingsRoute = new Hono()
           ],
           success_url: `${origin}/book/confirmed?booking=${booking!.id}`,
           cancel_url: `${origin}/bookings`,
-          metadata: { bookingId: String(booking!.id) },
+          metadata: {
+            adminInvoiceId: String(invoice!.id),
+            invoiceNumber,
+            clientId: String(client!.id),
+            bookingId: String(booking!.id),
+          },
         });
         checkoutUrl = session.url;
+        await db.update(invoices).set({ stripeCheckoutSessionId: session.id }).where(eq(invoices.id, invoice!.id));
         await db
           .update(bookings)
-          .set({ stripeCheckoutSessionId: session.id })
+          .set({ stripeCheckoutSessionId: session.id, invoiceId: invoice!.id })
           .where(eq(bookings.id, booking!.id));
       } catch (err) {
-        console.error("[bookings/manual] failed to create Stripe checkout for deposit", err);
+        console.error("[bookings/manual] failed to create invoice + Stripe checkout for deposit", err);
       }
     }
 

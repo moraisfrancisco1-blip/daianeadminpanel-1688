@@ -7,7 +7,8 @@ import { StatusPill } from "../components/status-pill";
 import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
 import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, cmpNumberLike, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
-import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil } from "lucide-react";
+import { netToGross } from "../../api/lib/totals";
+import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil, Link2, Copy, ExternalLink } from "lucide-react";
 import { downloadFile } from "../lib/download";
 
 export default function InvoicesPage() {
@@ -45,6 +46,7 @@ interface InvoiceRow {
   reminderCount: number;
   issueDate: string;
   stripePaymentIntentId: string | null;
+  stripeCheckoutSessionId: string | null;
 }
 
 type InvoiceSortKey = "number" | "client" | "date" | "total" | "status";
@@ -66,6 +68,9 @@ function InvoicesContent() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const { sortKey, sortDir, toggle } = useSort<InvoiceSortKey>("date", "desc");
+  const [paymentLinkInvoice, setPaymentLinkInvoice] = useState<InvoiceRow | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   function showToast(type: "success" | "error", message: string) {
     setToast({ type, message });
@@ -81,6 +86,23 @@ function InvoicesContent() {
       showToast("error", e?.message ?? "Failed to download PDF");
     } finally {
       setDownloadingId(null);
+    }
+  }
+
+  async function requestPaymentLink(inv: InvoiceRow) {
+    setPaymentLinkInvoice(inv);
+    setCheckoutUrl(null);
+    setCheckoutLoading(true);
+    try {
+      const res = await api.invoices[":id"].checkout.$post({ param: { id: String(inv.id) } });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to create payment link");
+      setCheckoutUrl((data as { checkoutUrl?: string })?.checkoutUrl ?? null);
+    } catch (e: any) {
+      showToast("error", e?.message ?? "Failed to create payment link");
+      setPaymentLinkInvoice(null);
+    } finally {
+      setCheckoutLoading(false);
     }
   }
 
@@ -218,7 +240,7 @@ function InvoicesContent() {
           description: i.description,
           serviceId: i.serviceId ?? null,
           quantity: i.quantity,
-          unitPrice: i.unitPrice,
+          unitPrice: netToGross(i.unitPrice, i.vatRate),
           vatRate: i.vatRate,
         })),
       );
@@ -337,6 +359,20 @@ function InvoicesContent() {
                           <Send className="size-4" />
                         )}
                       </button>
+                      {inv.status !== "paid" && (
+                        <button
+                          onClick={() => requestPaymentLink(inv)}
+                          disabled={checkoutLoading && paymentLinkInvoice?.id === inv.id}
+                          className="text-muted-foreground hover:text-primary disabled:opacity-50"
+                          title="Send Payment Link"
+                        >
+                          {checkoutLoading && paymentLinkInvoice?.id === inv.id ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Link2 className="size-4" />
+                          )}
+                        </button>
+                      )}
                       <button
                         onClick={() => openEditForm(inv)}
                         className="text-muted-foreground hover:text-primary"
@@ -419,6 +455,57 @@ function InvoicesContent() {
                   ? "Update invoice"
                   : "Create invoice"}
             </Button>
+          </div>
+        </div>
+      )}
+
+      {paymentLinkInvoice && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-xl p-6 w-full max-w-md space-y-4 relative">
+            <button onClick={() => setPaymentLinkInvoice(null)} className="absolute top-4 right-4 text-muted-foreground">
+              <X className="size-4" />
+            </button>
+            <h2 className="font-display text-xl font-semibold">Send Payment Link</h2>
+            <p className="text-sm text-muted-foreground">
+              Invoice <strong>{paymentLinkInvoice.invoiceNumber}</strong> — €{paymentLinkInvoice.total.toFixed(2)}
+            </p>
+
+            {checkoutLoading ? (
+              <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Creating payment link…
+              </div>
+            ) : checkoutUrl ? (
+              <div className="space-y-2">
+                <input
+                  readOnly
+                  value={checkoutUrl}
+                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-xs"
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(checkoutUrl).then(() => showToast("success", "Payment link copied."))}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
+                  >
+                    <Copy className="size-4" /> Copy link
+                  </button>
+                  <button
+                    onClick={() => window.open(checkoutUrl, "_blank")}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
+                  >
+                    <ExternalLink className="size-4" /> Open link
+                  </button>
+                </div>
+                <button
+                  onClick={() => { sendInvoice.mutate(paymentLinkInvoice.id); setPaymentLinkInvoice(null); }}
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:opacity-90"
+                >
+                  <Send className="size-4" /> Send via email
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Could not create a payment link.</p>
+            )}
           </div>
         </div>
       )}

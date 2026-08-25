@@ -89,6 +89,7 @@ export const invoices = sqliteTable("invoices", {
   reminderCount: integer("reminder_count").notNull().default(0),
   stripeInvoiceId: text("stripe_invoice_id").unique(),
   stripePaymentIntentId: text("stripe_payment_intent_id").unique(),
+  stripeCheckoutSessionId: text("stripe_checkout_session_id").unique(),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),

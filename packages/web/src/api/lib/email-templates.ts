@@ -261,10 +261,12 @@ export function buildInvoiceEmailHtml(opts: {
   invoiceNumber: string;
   total: number;
   dueDate: Date;
+  paymentUrl?: string | null;
 }) {
   return wrapper(`
     <p>Dear ${opts.clientName},</p>
     <p>Please find attached invoice <strong>${opts.invoiceNumber}</strong> for <strong>€${opts.total.toFixed(2)}</strong>, due on ${opts.dueDate.toLocaleDateString("en-GB")}.</p>
+    ${opts.paymentUrl ? `<p><a href="${opts.paymentUrl}" style="display:inline-block;background:${COPPER};color:#ffffff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold;">Pay now</a></p>` : ""}
     <p>Thank you for choosing Studio Daï Oakes.</p>
     <p style="color:${COPPER};font-style:italic;">— Daiane</p>
   `);

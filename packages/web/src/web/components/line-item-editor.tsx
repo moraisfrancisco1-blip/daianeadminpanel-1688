@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "./ui/button";
+import { computeTotals } from "../../api/lib/totals";
 
 export interface LineItemDraft {
   description: string;
@@ -51,8 +52,7 @@ export function LineItemEditor({
     update(i, { serviceId, description, unitPrice: svc.price, vatRate: svc.vatRate });
   }
 
-  const subtotal = items.reduce((s, i) => s + i.quantity * i.unitPrice, 0);
-  const vatTotal = items.reduce((s, i) => s + i.quantity * i.unitPrice * i.vatRate, 0);
+  const totals = computeTotals(items);
 
   return (
     <div className="space-y-3">
@@ -117,9 +117,9 @@ export function LineItemEditor({
         <Plus className="size-4" /> Add line
       </button>
       <div className="flex justify-end gap-6 text-sm pt-2 border-t border-border">
-        <span className="text-muted-foreground">Subtotal: €{subtotal.toFixed(2)}</span>
-        <span className="text-muted-foreground">VAT: €{vatTotal.toFixed(2)}</span>
-        <span className="font-semibold">Total: €{(subtotal + vatTotal).toFixed(2)}</span>
+        <span className="text-muted-foreground">Subtotal excl. VAT: €{totals.subtotal.toFixed(2)}</span>
+        <span className="text-muted-foreground">VAT: €{totals.vatTotal.toFixed(2)}</span>
+        <span className="font-semibold">Total: €{totals.total.toFixed(2)}</span>
       </div>
     </div>
   );

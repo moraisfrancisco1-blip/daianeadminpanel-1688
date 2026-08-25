@@ -3,13 +3,83 @@ import { db } from "../database";
 import { invoices, invoiceItems, clients, payments } from "../database/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
-import { computeTotals } from "../lib/totals";
+import { computeTotals, vatBreakdownFromNet } from "../lib/totals";
 import { nextNumber } from "../lib/counters";
 import { generateInvoicePdf } from "../lib/invoice-pdf";
 import { buildInvoiceEmailHtml, buildAdminInvoicePaidHtml } from "../lib/email-templates";
 import { sendEmail } from "../services/email";
 import { COMPANY } from "../lib/company";
-import { createStripeInvoice, finalizeStripeInvoice, voidStripeInvoice, deleteStripeInvoice } from "../services/stripe-sync";
+import { stripe } from "../services/stripe";
+import { findStripeCustomerByEmail, createStripeCustomer, voidStripeInvoice, deleteStripeInvoice } from "../services/stripe-sync";
+
+async function ensureStripeCustomerId(client: any): Promise<string | null> {
+  if (client.stripeCustomerId) return client.stripeCustomerId;
+  if (!stripe) return null;
+  let customerId = client.email ? await findStripeCustomerByEmail(client.email) : null;
+  if (!customerId) {
+    customerId = await createStripeCustomer({
+      name: client.name,
+      email: client.email ?? null,
+      phone: client.phone ?? null,
+      address: client.address ?? null,
+      city: client.city ?? null,
+      country: client.country ?? null,
+      zipCode: client.zipCode ?? null,
+    });
+  }
+  if (customerId) {
+    await db.update(clients).set({ stripeCustomerId: customerId }).where(eq(clients.id, client.id));
+  }
+  return customerId;
+}
+
+async function getOrCreateCheckoutUrl(invoice: any, client: any, origin: string): Promise<string | null> {
+  if (!stripe) return null;
+  if (invoice.status === "paid" || invoice.status === "cancelled") return null;
+
+  // Reuse an existing open/complete session.
+  if (invoice.stripeCheckoutSessionId) {
+    try {
+      const existing = await stripe.checkout.sessions.retrieve(invoice.stripeCheckoutSessionId);
+      if (existing.url && (existing.status === "open" || existing.status === "complete")) {
+        return existing.url;
+      }
+    } catch {
+      // fall through and create a new session
+    }
+  }
+
+  const customerId = await ensureStripeCustomerId(client);
+  if (!customerId) return null;
+
+  const metadata: Record<string, string> = {
+    adminInvoiceId: String(invoice.id),
+    invoiceNumber: invoice.invoiceNumber,
+    clientId: String(client.id),
+  };
+  if (invoice.bookingId) metadata.bookingId = String(invoice.bookingId);
+
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    line_items: [
+      {
+        price_data: {
+          currency: "eur",
+          product_data: { name: `Invoice ${invoice.invoiceNumber}` },
+          unit_amount: Math.round(invoice.total * 100),
+        },
+        quantity: 1,
+      },
+    ],
+    success_url: `${origin}/invoices`,
+    cancel_url: `${origin}/invoices`,
+    customer: customerId,
+    metadata,
+  });
+
+  await db.update(invoices).set({ stripeCheckoutSessionId: session.id }).where(eq(invoices.id, invoice.id));
+  return session.url ?? null;
+}
 
 export const invoicesRoute = new Hono()
   .get("/", requireAuth, async (c) => {
@@ -27,6 +97,7 @@ export const invoicesRoute = new Hono()
         clientName: clients.name,
         clientEmail: clients.email,
         stripePaymentIntentId: invoices.stripePaymentIntentId,
+        stripeCheckoutSessionId: invoices.stripeCheckoutSessionId,
       })
       .from(invoices)
       .leftJoin(clients, eq(invoices.clientId, clients.id))
@@ -51,34 +122,8 @@ export const invoicesRoute = new Hono()
       ? new Date(body.dueDate)
       : new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
 
-    // Get client to check for stripeCustomerId
-    const [client] = await db.select().from(clients).where(eq(clients.id, body.clientId));
-    
-    // Create invoice in Stripe if client has stripeCustomerId
-    let stripeInvoiceId: string | null = null;
-    let stripePaymentIntentId: string | null = null;
-    
-    if (client?.stripeCustomerId) {
-      const stripeResult = await createStripeInvoice({
-        stripeCustomerId: client.stripeCustomerId,
-        invoiceNumber,
-        issueDate,
-        dueDate,
-        items: lineItems.map((item) => ({
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          vatRate: item.vatRate,
-        })),
-        notes: body.notes ?? null,
-      });
-      
-      if (stripeResult) {
-        stripeInvoiceId = stripeResult.stripeInvoiceId;
-        stripePaymentIntentId = stripeResult.stripePaymentIntentId;
-      }
-    }
-
+    // The Admin is the source of truth: create only the local invoice.
+    // (No Stripe Native Invoice — Stripe is only the payment processor.)
     const [invoice] = await db
       .insert(invoices)
       .values({
@@ -91,8 +136,6 @@ export const invoicesRoute = new Hono()
         subtotal,
         vatTotal,
         total,
-        stripeInvoiceId,
-        stripePaymentIntentId,
       })
       .returning();
 
@@ -134,6 +177,13 @@ export const invoicesRoute = new Hono()
     const [invoice] = await db.update(invoices).set(values).where(eq(invoices.id, id)).returning();
 
     if (status === "paid" && invoice) {
+      // Record a manual payment for any outstanding balance (keeps payment history consistent).
+      const existingPayments = await db.select().from(payments).where(eq(payments.invoiceId, id));
+      const paidSoFar = existingPayments.reduce((s, p) => s + p.amount, 0);
+      const remaining = Number((invoice.total - paidSoFar).toFixed(2));
+      if (remaining > 0) {
+        await db.insert(payments).values({ invoiceId: id, amount: remaining, method: "manual", paidAt: new Date() });
+      }
       const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
       await sendEmail({
         to: COMPANY.adminEmail,
@@ -187,9 +237,7 @@ export const invoicesRoute = new Hono()
     const items = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, id));
     const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
 
-    const { vatBreakdown } = computeTotals(
-      items.map((i) => ({ description: i.description, quantity: i.quantity, unitPrice: i.unitPrice, vatRate: i.vatRate })),
-    );
+    const vatBreakdown = vatBreakdownFromNet(items);
 
     const pdfBuffer = await generateInvoicePdf({
       invoiceNumber: invoice.invoiceNumber,
@@ -225,9 +273,7 @@ export const invoicesRoute = new Hono()
     const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
     if (!client?.email) return c.json({ message: "Client has no email" }, 400);
 
-    const { vatBreakdown } = computeTotals(
-      items.map((i) => ({ description: i.description, quantity: i.quantity, unitPrice: i.unitPrice, vatRate: i.vatRate })),
-    );
+    const vatBreakdown = vatBreakdownFromNet(items);
 
     const pdfBuffer = await generateInvoicePdf({
       invoiceNumber: invoice.invoiceNumber,
@@ -244,6 +290,9 @@ export const invoicesRoute = new Hono()
       paidAt: invoice.paidAt,
     });
 
+    const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
+    const paymentUrl = await getOrCreateCheckoutUrl(invoice, client, origin);
+
     await sendEmail({
       to: client.email,
       subject: `Invoice ${invoice.invoiceNumber} — Studio Daï Oakes`,
@@ -252,17 +301,29 @@ export const invoicesRoute = new Hono()
         invoiceNumber: invoice.invoiceNumber,
         total: invoice.total,
         dueDate: invoice.dueDate,
+        paymentUrl,
       }),
       attachments: [{ filename: `invoice-${invoice.invoiceNumber}.pdf`, content: pdfBuffer }],
     });
 
-    // Finalize invoice in Stripe if it has stripeInvoiceId
-    if (invoice.stripeInvoiceId) {
-      await finalizeStripeInvoice(invoice.stripeInvoiceId);
-    }
-
     await db.update(invoices).set({ status: "sent" }).where(eq(invoices.id, id));
-    return c.json({ success: true }, 200);
+    return c.json({ success: true, checkoutUrl: paymentUrl }, 200);
+  })
+  .post("/:id/checkout", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+    if (!invoice) return c.json({ message: "Not found" }, 404);
+    if (invoice.status === "cancelled") return c.json({ message: "Invoice is cancelled" }, 400);
+    if (invoice.status === "paid") return c.json({ message: "Invoice is already paid" }, 400);
+
+    const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
+    if (!client) return c.json({ message: "Client not found" }, 404);
+
+    const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
+    const checkoutUrl = await getOrCreateCheckoutUrl(invoice, client, origin);
+    if (!checkoutUrl) return c.json({ message: "Stripe not configured or could not create checkout" }, 500);
+
+    return c.json({ checkoutUrl }, 200);
   })
   .put("/:id/edit", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));

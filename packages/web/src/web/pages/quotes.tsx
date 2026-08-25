@@ -7,6 +7,7 @@ import { StatusPill } from "../components/status-pill";
 import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
 import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, cmpNumberLike, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
+import { netToGross } from "../../api/lib/totals";
 import { Plus, X, ArrowRightCircle, Pencil, Trash2, Loader2 } from "lucide-react";
 
 export default function QuotesPage() {
@@ -183,7 +184,7 @@ function QuotesContent() {
           description: i.description,
           serviceId: i.serviceId ?? null,
           quantity: i.quantity,
-          unitPrice: i.unitPrice,
+          unitPrice: netToGross(i.unitPrice, i.vatRate),
           vatRate: i.vatRate,
         })),
       );
