@@ -19,6 +19,7 @@ type EmailRow = {
   providerMessageId: string | null;
   error: string | null;
   provider: string | null;
+  source: string;
   invoiceNumber: string | null;
   clientName: string | null;
 };
@@ -157,6 +158,11 @@ function EmailHistoryContent() {
                       <span className="inline-flex items-center gap-1 text-xs font-medium">
                         <Mail className="size-3.5" /> {TYPE_LABEL[e.type] ?? e.type}
                       </span>
+                      {e.source === "historical_import" ? (
+                        <p className="text-[10px] mt-0.5 italic text-muted-foreground/70">Historical import</p>
+                      ) : (
+                        <p className="text-[10px] mt-0.5 text-[#4C7A56]">Current system</p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium">{e.recipientName ?? e.recipientEmail}</p>

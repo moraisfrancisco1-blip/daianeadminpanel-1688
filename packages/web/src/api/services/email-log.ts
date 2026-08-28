@@ -44,6 +44,7 @@ async function logEmailRow(
       providerMessageId: extra.providerMessageId ?? null,
       error: extra.error ?? null,
       provider: "resend",
+      source: "current_system",
     });
   } catch (err) {
     console.error("[email-log] Failed to write email log:", err);

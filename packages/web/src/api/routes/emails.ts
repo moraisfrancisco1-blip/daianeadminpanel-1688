@@ -54,6 +54,7 @@ export const emailsRoute = new Hono()
         providerMessageId: emailLog.providerMessageId,
         error: emailLog.error,
         provider: emailLog.provider,
+        source: emailLog.source,
         invoiceNumber: invoices.invoiceNumber,
         clientName: clients.name,
       })

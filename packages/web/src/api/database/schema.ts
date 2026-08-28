@@ -252,24 +252,35 @@ export const invoiceActivity = sqliteTable("invoice_activity", {
 });
 
 // Global log of every email sent by the platform (proof of delivery/failure).
-export const emailLog = sqliteTable("email_log", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  clientId: integer("client_id"),
-  invoiceId: integer("invoice_id"),
-  bookingId: integer("booking_id"),
-  recipientEmail: text("recipient_email").notNull(),
-  recipientName: text("recipient_name"),
-  // invoice | payment_link | booking_confirmation | reminder | cancellation | quote | package | other
-  type: text("type").notNull().default("other"),
-  subject: text("subject").notNull(),
-  // sent | failed  (Delivered only if the provider confirms it — Resend does not for emails.send)
-  status: text("status").notNull().default("sent"),
-  providerMessageId: text("provider_message_id"),
-  error: text("error"),
-  provider: text("provider").notNull().default("resend"),
-});
+export const emailLog = sqliteTable(
+  "email_log",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    clientId: integer("client_id"),
+    invoiceId: integer("invoice_id"),
+    bookingId: integer("booking_id"),
+    recipientEmail: text("recipient_email").notNull(),
+    recipientName: text("recipient_name"),
+    // invoice | payment_link | booking_confirmation | reminder | cancellation | quote | package | other
+    type: text("type").notNull().default("other"),
+    subject: text("subject").notNull(),
+    // sent | failed  (Delivered only if the provider confirms it — Resend does not for emails.send)
+    status: text("status").notNull().default("sent"),
+    providerMessageId: text("provider_message_id"),
+    error: text("error"),
+    provider: text("provider").notNull().default("resend"),
+    // "historical_import" = imported from the provider; "current_system" = sent by the running platform.
+    source: text("source").notNull().default("current_system"),
+  },
+  (table) => [
+    // Dedup / idempotency for historical imports — one row per provider message id.
+    uniqueIndex("email_log_provider_message_id_unique")
+      .on(table.providerMessageId)
+      .where(sql`${table.providerMessageId} IS NOT NULL`),
+  ],
+);
 
 export * from "./auth-schema";
