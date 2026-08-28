@@ -96,6 +96,7 @@ function BookingManualContent() {
     },
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["bookings"] });
+      qc.invalidateQueries({ queryKey: ["calendar-bookings"] });
       qc.invalidateQueries({ queryKey: ["blocked"] });
       setToast("Booking created successfully!");
       setTimeout(() => setToast(null), 3000);

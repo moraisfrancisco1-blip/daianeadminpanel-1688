@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { invoices, invoiceItems, clients, payments } from "../database/schema";
-import { eq, desc } from "drizzle-orm";
+import { invoices, invoiceItems, clients, payments, bookings } from "../database/schema";
+import { eq, desc, leftJoin } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { computeTotals, vatBreakdownFromNet } from "../lib/totals";
 import { nextNumber, nextTestNumber } from "../lib/counters";
 import { generateInvoicePdf } from "../lib/invoice-pdf";
-import { buildInvoiceEmailHtml, buildAdminInvoicePaidHtml } from "../lib/email-templates";
+import { buildInvoiceEmailHtml, buildPaymentLinkEmailHtml, buildAdminInvoicePaidHtml } from "../lib/email-templates";
 import { sendEmail } from "../services/email";
 import { COMPANY } from "../lib/company";
 import { stripe } from "../services/stripe";
@@ -102,9 +102,12 @@ export const invoicesRoute = new Hono()
         stripePaymentIntentId: invoices.stripePaymentIntentId,
         stripeCheckoutSessionId: invoices.stripeCheckoutSessionId,
         isTest: invoices.isTest,
+        sessionDate: bookings.date,
+        sessionStartTime: bookings.startTime,
       })
       .from(invoices)
       .leftJoin(clients, eq(invoices.clientId, clients.id))
+      .leftJoin(bookings, eq(invoices.bookingId, bookings.id))
       .orderBy(desc(invoices.issueDate));
     return c.json({ invoices: all }, 200);
   })
@@ -298,9 +301,8 @@ export const invoicesRoute = new Hono()
       paidAt: invoice.paidAt,
     });
 
-    const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
-    const paymentUrl = await getOrCreateCheckoutUrl(invoice, client, origin);
-
+    // "Send Invoice" = email the invoice document (PDF). No payment link is created here;
+    // "Send Payment Link" is a separate, dedicated endpoint (/send-payment-link).
     await sendEmail({
       to: client.email,
       subject: `Invoice ${invoice.invoiceNumber} — Studio Daï Oakes`,
@@ -309,13 +311,45 @@ export const invoicesRoute = new Hono()
         invoiceNumber: invoice.invoiceNumber,
         total: invoice.total,
         dueDate: invoice.dueDate,
-        paymentUrl,
+        paymentUrl: null,
       }),
       attachments: [{ filename: `invoice-${invoice.invoiceNumber}.pdf`, content: pdfBuffer }],
     });
 
     await db.update(invoices).set({ status: "sent" }).where(eq(invoices.id, id));
-    return c.json({ success: true, checkoutUrl: paymentUrl }, 200);
+    return c.json({ success: true }, 200);
+  })
+  .post("/:id/send-payment-link", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+    if (!invoice) return c.json({ message: "Not found" }, 404);
+    if (invoice.status === "cancelled") return c.json({ message: "Invoice is cancelled" }, 400);
+    if (invoice.status === "paid") return c.json({ message: "Invoice is already paid" }, 400);
+
+    const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
+    if (!client) return c.json({ message: "Client not found" }, 404);
+    if (!client.email) return c.json({ message: "Client has no email" }, 400);
+
+    // Idempotent: reuses an existing open/complete Checkout Session, only creating a new
+    // one when the previous link expired/failed. Never creates a duplicate invoice.
+    const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
+    const checkoutUrl = await getOrCreateCheckoutUrl(invoice, client, origin);
+    if (!checkoutUrl) return c.json({ message: "Stripe not configured or could not create payment link" }, 500);
+
+    // "Send Payment Link" = email only the payment link (no invoice PDF attachment).
+    await sendEmail({
+      to: client.email,
+      subject: `Payment link for invoice ${invoice.invoiceNumber} — Studio Daï Oakes`,
+      html: buildPaymentLinkEmailHtml({
+        clientName: client.name,
+        invoiceNumber: invoice.invoiceNumber,
+        total: invoice.total,
+        paymentUrl: checkoutUrl,
+      }),
+    });
+
+    await db.update(invoices).set({ status: "sent" }).where(eq(invoices.id, id));
+    return c.json({ success: true, checkoutUrl }, 200);
   })
   .post("/:id/checkout", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));

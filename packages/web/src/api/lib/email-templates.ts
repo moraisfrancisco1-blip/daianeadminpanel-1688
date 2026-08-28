@@ -273,7 +273,32 @@ export function buildInvoiceEmailHtml(opts: {
 }
 
 // ============================================================================
-// 6. INVOICE REMINDER
+// 6. PAYMENT LINK EMAIL  (separate from the invoice PDF email — sends only the link)
+// ============================================================================
+export function buildPaymentLinkEmailHtml(opts: {
+  clientName: string;
+  invoiceNumber: string;
+  total: number;
+  paymentUrl: string;
+}) {
+  return wrapper(`
+    <p>Dear ${opts.clientName},</p>
+    <p>You have an open invoice <strong>${opts.invoiceNumber}</strong> for <strong>€${opts.total.toFixed(2)}</strong>.</p>
+    <p style="text-align:center;">
+      <a href="${opts.paymentUrl}" style="display:inline-block;background:${COPPER};color:#ffffff;padding:12px 22px;border-radius:6px;text-decoration:none;font-weight:bold;">
+        Pay invoice now
+      </a>
+    </p>
+    <p>If the button doesn't work, copy and paste this link into your browser:<br/>
+      <a href="${opts.paymentUrl}" style="color:${COPPER};">${opts.paymentUrl}</a>
+    </p>
+    <p>Thank you for choosing Studio Daï Oakes.</p>
+    <p style="color:${COPPER};font-style:italic;">— Studio Daï Oakes</p>
+  `);
+}
+
+// ============================================================================
+// 7. INVOICE REMINDER
 // ============================================================================
 export function buildReminderEmailHtml(opts: {
   clientName: string;

@@ -48,6 +48,8 @@ interface InvoiceRow {
   stripePaymentIntentId: string | null;
   stripeCheckoutSessionId: string | null;
   isTest: boolean;
+  sessionDate: string | null;
+  sessionStartTime: string | null;
 }
 
 type InvoiceSortKey = "number" | "client" | "date" | "total" | "status";
@@ -199,6 +201,23 @@ function InvoicesContent() {
     },
   });
 
+  const sendPaymentLink = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await api.invoices[":id"]["send-payment-link"].$post({ param: { id: String(id) } });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as any)?.message ?? "Failed to send payment link");
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      showToast("success", "Payment link emailed to client.");
+    },
+    onError: (err: any) => {
+      showToast("error", err?.message ?? "Failed to send payment link.");
+    },
+  });
+
+
   const deleteInvoice = useMutation({
     mutationFn: async (id: number) => {
       const res = await api.invoices[":id"].$delete({ param: { id: String(id) } });
@@ -313,7 +332,7 @@ function InvoicesContent() {
                 <SortableTh label="Invoice #" active={sortKey === "number"} dir={sortDir} onClick={() => toggle("number")} />
                 <SortableTh label="Client" active={sortKey === "client"} dir={sortDir} onClick={() => toggle("client")} />
                 <SortableTh label="Date" active={sortKey === "date"} dir={sortDir} onClick={() => toggle("date")} />
-                <th className="px-4 py-3 font-medium">Due</th>
+                <th className="px-4 py-3 font-medium">Session</th>
                 <SortableTh label="Total" active={sortKey === "total"} dir={sortDir} onClick={() => toggle("total")} />
                 <SortableTh label="Status" active={sortKey === "status"} dir={sortDir} onClick={() => toggle("status")} />
                 <th className="px-4 py-3 font-medium text-right">Actions</th>
@@ -335,7 +354,13 @@ function InvoicesContent() {
                     {new Date(inv.issueDate).toLocaleDateString("en-GB")}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {new Date(inv.dueDate).toLocaleDateString("en-GB")}
+                    {inv.sessionDate
+                      ? (() => {
+                          const d = new Date(`${inv.sessionDate}T00:00:00`);
+                          const day = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                          return inv.sessionStartTime ? `${day} · ${inv.sessionStartTime}` : day;
+                        })()
+                      : <span className="italic opacity-70">No session</span>}
                   </td>
                   <td className="px-4 py-3 font-medium">€{inv.total.toFixed(2)}</td>
                   <td className="px-4 py-3">
@@ -513,7 +538,7 @@ function InvoicesContent() {
                   </button>
                 </div>
                 <button
-                  onClick={() => { sendInvoice.mutate(paymentLinkInvoice.id); setPaymentLinkInvoice(null); }}
+                  onClick={() => { sendPaymentLink.mutate(paymentLinkInvoice.id); setPaymentLinkInvoice(null); }}
                   className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:opacity-90"
                 >
                   <Send className="size-4" /> Send via email

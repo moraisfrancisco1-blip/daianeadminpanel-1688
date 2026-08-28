@@ -60,6 +60,7 @@ function BookingsContent() {
     mutationFn: async (id: number) => (await api.bookings[":id"].$delete({ param: { id: String(id) } })).json(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["bookings"] });
+      qc.invalidateQueries({ queryKey: ["calendar-bookings"] });
       setToast("Booking deleted.");
       setTimeout(() => setToast(null), 3000);
     },

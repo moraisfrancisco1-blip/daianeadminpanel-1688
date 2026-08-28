@@ -103,7 +103,7 @@ function CalendarContent() {
   };
 
   const bookingsQ = useQuery({
-    queryKey: ["bookings"],
+    queryKey: ["calendar-bookings"],
     staleTime: 0,
     refetchOnMount: "always",
     queryFn: async (): Promise<BookingItem[]> => {
@@ -160,6 +160,7 @@ function CalendarContent() {
       (await api.bookings[":id"].$put({ param: { id: String(p.id) }, json: p.data })).json(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["bookings"] });
+      qc.invalidateQueries({ queryKey: ["calendar-bookings"] });
       qc.invalidateQueries({ queryKey: ["dashboard-today"] });
       setSelectedBooking(null);
       notify("Reserva atualizada.");
@@ -171,6 +172,7 @@ function CalendarContent() {
     mutationFn: async (id: number) => (await api.bookings[":id"].$delete({ param: { id: String(id) } })).json(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["bookings"] });
+      qc.invalidateQueries({ queryKey: ["calendar-bookings"] });
       setSelectedBooking(null);
       notify("Reserva eliminada.");
     },
@@ -497,6 +499,24 @@ function BookingDetailModal(props: {
   const [paymentLinkOpen, setPaymentLinkOpen] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [sendInvoiceLoading, setSendInvoiceLoading] = useState(false);
+  const [sendInvoiceMsg, setSendInvoiceMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function sendInvoiceEmail() {
+    if (!booking.invoiceId) return;
+    setSendInvoiceLoading(true);
+    setSendInvoiceMsg(null);
+    try {
+      const res = await fetch(`/api/invoices/${booking.invoiceId}/send`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to send invoice");
+      setSendInvoiceMsg({ ok: true, text: "Invoice emailed to the client." });
+    } catch (e: any) {
+      setSendInvoiceMsg({ ok: false, text: e?.message ?? "Failed to send invoice." });
+    } finally {
+      setSendInvoiceLoading(false);
+    }
+  }
 
   const invoiceQ = useQuery({
     queryKey: ["invoice", booking.invoiceId],
@@ -530,7 +550,12 @@ function BookingDetailModal(props: {
   async function emailPaymentLink() {
     if (!booking.invoiceId) return;
     try {
-      await fetch(`/api/invoices/${booking.invoiceId}/send`, { method: "POST" });
+      const res = await fetch(`/api/invoices/${booking.invoiceId}/send-payment-link`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to send payment link");
+      setSendInvoiceMsg({ ok: true, text: "Payment link emailed to the client." });
+    } catch (e: any) {
+      setSendInvoiceMsg({ ok: false, text: e?.message ?? "Failed to send payment link." });
     } finally {
       setPaymentLinkOpen(false);
     }
@@ -633,6 +658,23 @@ function BookingDetailModal(props: {
             <option value="no_show">Não compareceu</option>
           </select>
         </div>
+
+        {invoiceQ.data && (
+          <div className="border-t pt-3 space-y-2">
+            <button
+              type="button"
+              onClick={sendInvoiceEmail}
+              disabled={sendInvoiceLoading}
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
+            >
+              {sendInvoiceLoading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+              Send Invoice - {invoiceQ.data.invoiceNumber}
+            </button>
+            {sendInvoiceMsg && (
+              <p className={`text-sm ${sendInvoiceMsg.ok ? "text-[#4C7A56]" : "text-destructive"}`}>{sendInvoiceMsg.text}</p>
+            )}
+          </div>
+        )}
 
         {invoiceQ.data && invoiceQ.data.status !== "paid" && invoiceQ.data.status !== "cancelled" && (
           <div className="border-t pt-3">
