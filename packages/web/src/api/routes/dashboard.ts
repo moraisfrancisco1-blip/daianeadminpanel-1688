@@ -21,6 +21,25 @@ function amsTodayStr(): string {
   return amsDateOf(new Date());
 }
 
+/** Current time-of-day in Europe/Amsterdam, expressed as minutes since midnight. */
+function amsNowMinutes(): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: AMS,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  return h * 60 + m;
+}
+
+/** "HH:MM" -> minutes since midnight. */
+function timeToMin(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
 /** Monday (YYYY-MM-DD) of the week containing the given YYYY-MM-DD date. */
 function mondayOf(dateStr: string): string {
   const [y, mo, d] = dateStr.split("-").map(Number);
@@ -189,7 +208,7 @@ export const dashboardRoute = new Hono()
   })
   .get("/upcoming-bookings", requireAuth, async (c) => {
     const limit = Number(c.req.query("limit") ?? 8);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = amsTodayStr();
     const allBookings = await db.select().from(bookings);
     const allServices = await db.select().from(services);
     const serviceMap = new Map(allServices.map((s) => [s.id, s.name]));
@@ -356,11 +375,18 @@ export const dashboardRoute = new Hono()
       depositStatus: b.depositStatus,
     }));
 
+    // "Próximo cliente" = first confirmed session today whose end time has NOT yet passed
+    // (compared with the current time in Europe/Amsterdam). Already-finished sessions are skipped.
+    const nowMin = amsNowMinutes();
+    const nextCandidates = sessions.filter(
+      (s) => s.status === "confirmed" && timeToMin(s.startTime) + (s.durationMinutes ?? 60) > nowMin,
+    );
+
     return c.json(
       {
         date: today,
         sessions,
-        nextClient: sessions.find((s) => s.status === "confirmed") ?? null,
+        nextClient: nextCandidates[0] ?? null,
         confirmedCount: sessions.filter((s) => s.status === "confirmed").length,
         completedCount: sessions.filter((s) => s.status === "completed").length,
         cancelledCount: sessions.filter((s) => s.status === "cancelled").length,

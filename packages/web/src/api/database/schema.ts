@@ -230,4 +230,46 @@ export const stripeWebhookEvents = sqliteTable("stripe_webhook_events", {
     .$defaultFn(() => new Date()),
 });
 
+// Persistent audit trail for a single invoice (all events related to that invoice).
+export const invoiceActivity = sqliteTable("invoice_activity", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  invoiceId: integer("invoice_id").notNull(),
+  // created | edited | sent | payment_link_created | payment_link_sent | status_changed |
+  // payment_recorded | payment_confirmed | email_failed | cancelled | other
+  type: text("type").notNull(),
+  oldStatus: text("old_status"),
+  newStatus: text("new_status"),
+  // admin | stripe | manual | email | system
+  channel: text("channel").notNull().default("system"),
+  recipientEmail: text("recipient_email"),
+  amount: real("amount"),
+  method: text("method"),
+  // free-form JSON for extra context (e.g. Stripe PI id, message id, error)
+  metadata: text("metadata"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+// Global log of every email sent by the platform (proof of delivery/failure).
+export const emailLog = sqliteTable("email_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  clientId: integer("client_id"),
+  invoiceId: integer("invoice_id"),
+  bookingId: integer("booking_id"),
+  recipientEmail: text("recipient_email").notNull(),
+  recipientName: text("recipient_name"),
+  // invoice | payment_link | booking_confirmation | reminder | cancellation | quote | package | other
+  type: text("type").notNull().default("other"),
+  subject: text("subject").notNull(),
+  // sent | failed  (Delivered only if the provider confirms it — Resend does not for emails.send)
+  status: text("status").notNull().default("sent"),
+  providerMessageId: text("provider_message_id"),
+  error: text("error"),
+  provider: text("provider").notNull().default("resend"),
+});
+
 export * from "./auth-schema";

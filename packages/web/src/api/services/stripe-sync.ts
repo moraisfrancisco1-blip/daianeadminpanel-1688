@@ -3,6 +3,7 @@ import { db } from "../database";
 import { clients, invoices } from "../database/schema";
 import { eq, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
+import { changeInvoiceStatus } from "./invoice-activity";
 
 /** Normalize an email for stable comparison (trim + lowercase). Never changes stored data. */
 export function normalizeEmail(email: string | null | undefined): string | null {
@@ -398,11 +399,12 @@ export async function syncStripeInvoiceStatus(stripeInvoiceId: string, status: s
       localStatus = existingInvoice.status;
   }
 
-  const updateData: Record<string, unknown> = { status: localStatus };
-  if (localStatus === "paid") {
-    updateData.paidAt = paidAt ?? new Date();
-  }
-
-  await db.update(invoices).set(updateData).where(eq(invoices.id, existingInvoice.id));
+  // Route through the central idempotent transition so the audit trail is recorded.
+  // Only an actual status change writes an activity row (repeated Stripe updates are no-ops).
+  await changeInvoiceStatus(existingInvoice.id, localStatus, {
+    channel: "stripe",
+    paidAt: localStatus === "paid" ? paidAt ?? new Date() : null,
+    metadata: { stripeInvoiceId },
+  });
   return true;
 }

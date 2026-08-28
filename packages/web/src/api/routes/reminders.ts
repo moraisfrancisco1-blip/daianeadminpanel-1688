@@ -4,6 +4,7 @@ import { invoices, clients, bookings } from "../database/schema";
 import { eq, and, lt, ne, isNull, inArray, gt } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { sendEmail } from "../services/email";
+import { sendTrackedEmail } from "../services/email-log";
 import { buildReminderEmailHtml, buildPostSessionEmailHtml, buildSessionReminderEmailHtml, buildRebookReminderEmailHtml } from "../lib/email-templates";
 import { COMPANY } from "../lib/company";
 import { services } from "../database/schema";
@@ -70,7 +71,7 @@ async function runPostSessionEmails() {
     const sessionMs = amsterdamEpoch(b.date, b.startTime);
     // Session must have happened, be past the delay window, and not be ancient.
     if (sessionMs > oldestMs && now >= sessionMs + delayMs) {
-      await sendEmail({
+      await sendTrackedEmail({
         to: b.email,
         subject: "Thank you 💛 / Obrigada / Bedankt — a little gift for your next session",
         html: buildPostSessionEmailHtml({
@@ -128,7 +129,7 @@ async function runSessionReminderCheck() {
       if (!b.email) continue;
       const [service] = await db.select().from(services).where(eq(services.id, b.serviceId));
 
-      await sendEmail({
+      await sendTrackedEmail({
         to: b.email,
         subject: daysAway === 2 ? "Your session is in 2 days" : "Your session is tomorrow",
         html: buildSessionReminderEmailHtml({
@@ -175,7 +176,7 @@ async function runRebookReminderCheck() {
       .where(and(eq(bookings.email, b.email), eq(bookings.status, "confirmed"), gt(bookings.date, b.date)));
     if (upcoming.length > 0) continue;
 
-    await sendEmail({
+    await sendTrackedEmail({
       to: b.email,
       subject: "Let's schedule your next session ✨",
       html: buildRebookReminderEmailHtml({ name: b.name }),
@@ -206,7 +207,7 @@ async function runReminderCheck() {
     const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
     if (!client?.email) continue;
 
-    await sendEmail({
+    await sendTrackedEmail({
       to: client.email,
       subject: `Payment reminder — Invoice ${invoice.invoiceNumber}`,
       html: buildReminderEmailHtml({
@@ -242,7 +243,7 @@ export const remindersRoute = new Hono()
     const [b] = await db.select().from(bookings).where(eq(bookings.id, id));
     if (!b) return c.json({ message: "Booking not found" }, 404);
     if (!b.email) return c.json({ message: "Booking has no email" }, 400);
-    await sendEmail({
+    await sendTrackedEmail({
       to: b.email,
       subject: "Thank you 💛 / Obrigada / Bedankt — a little gift for your next session",
       html: buildPostSessionEmailHtml({
@@ -263,7 +264,7 @@ export const remindersRoute = new Hono()
     const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
     if (!client?.email) return c.json({ message: "Client has no email" }, 400);
 
-    await sendEmail({
+    await sendTrackedEmail({
       to: client.email,
       subject: `Payment reminder — Invoice ${invoice.invoiceNumber}`,
       html: buildReminderEmailHtml({

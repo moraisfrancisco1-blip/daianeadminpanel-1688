@@ -1,13 +1,15 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { invoices, invoiceItems, clients, payments, bookings } from "../database/schema";
+import { invoices, invoiceItems, clients, payments, bookings, invoiceActivity, emailLog } from "../database/schema";
 import { eq, desc, leftJoin } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { computeTotals, vatBreakdownFromNet } from "../lib/totals";
 import { nextNumber, nextTestNumber } from "../lib/counters";
 import { generateInvoicePdf } from "../lib/invoice-pdf";
 import { buildInvoiceEmailHtml, buildPaymentLinkEmailHtml, buildAdminInvoicePaidHtml } from "../lib/email-templates";
+import { sendTrackedEmail } from "../services/email-log";
 import { sendEmail } from "../services/email";
+import { changeInvoiceStatus, recordInvoiceActivity } from "../services/invoice-activity";
 import { COMPANY } from "../lib/company";
 import { stripe } from "../services/stripe";
 import { findStripeCustomerByEmail, createStripeCustomer, voidStripeInvoice, deleteStripeInvoice } from "../services/stripe-sync";
@@ -118,7 +120,17 @@ export const invoicesRoute = new Hono()
     const items = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, id));
     const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
     const invoicePayments = await db.select().from(payments).where(eq(payments.invoiceId, id));
-    return c.json({ invoice, items, client, payments: invoicePayments }, 200);
+    const activity = await db
+      .select()
+      .from(invoiceActivity)
+      .where(eq(invoiceActivity.invoiceId, id))
+      .orderBy(desc(invoiceActivity.createdAt));
+    const emails = await db
+      .select()
+      .from(emailLog)
+      .where(eq(emailLog.invoiceId, id))
+      .orderBy(desc(emailLog.createdAt));
+    return c.json({ invoice, items, client, payments: invoicePayments, activity, emails }, 200);
   })
   .post("/", requireAuth, async (c) => {
     const body = await c.req.json();
@@ -162,6 +174,15 @@ export const invoicesRoute = new Hono()
       });
     }
 
+    await recordInvoiceActivity({
+      invoiceId: invoice!.id,
+      type: "created",
+      newStatus: "draft",
+      channel: "admin",
+      amount: total,
+      metadata: { isTest },
+    });
+
     return c.json({ invoice }, 201);
   })
   .put("/:id/status", requireAuth, async (c) => {
@@ -171,11 +192,7 @@ export const invoicesRoute = new Hono()
     // Get existing invoice to check for stripeInvoiceId
     const [existingInvoice] = await db.select().from(invoices).where(eq(invoices.id, id));
     if (!existingInvoice) return c.json({ message: "Not found" }, 404);
-    
-    const values: Record<string, unknown> = { status };
-    if (status === "paid") values.paidAt = new Date();
-    else values.paidAt = null;
-    
+
     // Sync status with Stripe if invoice has stripeInvoiceId
     if (existingInvoice.stripeInvoiceId) {
       if (status === "cancelled") {
@@ -185,18 +202,21 @@ export const invoicesRoute = new Hono()
       // Note: "paid" status is typically synced via webhook from Stripe
     }
     
-    const [invoice] = await db.update(invoices).set(values).where(eq(invoices.id, id)).returning();
+    const res = await changeInvoiceStatus(id, status, { channel: "admin", type: "status_changed" });
 
-    if (status === "paid" && invoice) {
+    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+
+    if (status === "paid" && res.changed && invoice) {
       // Record a manual payment for any outstanding balance (keeps payment history consistent).
       const existingPayments = await db.select().from(payments).where(eq(payments.invoiceId, id));
       const paidSoFar = existingPayments.reduce((s, p) => s + p.amount, 0);
       const remaining = Number((invoice.total - paidSoFar).toFixed(2));
       if (remaining > 0) {
         await db.insert(payments).values({ invoiceId: id, amount: remaining, method: "manual", paidAt: new Date() });
+        await recordInvoiceActivity({ invoiceId: id, type: "payment_recorded", channel: "manual", method: "manual", amount: remaining });
       }
       const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
-      await sendEmail({
+      await sendTrackedEmail({
         to: COMPANY.adminEmail,
         subject: `Invoice paid — ${invoice.invoiceNumber}`,
         html: buildAdminInvoicePaidHtml({
@@ -222,13 +242,14 @@ export const invoicesRoute = new Hono()
       })
       .returning();
 
+    await recordInvoiceActivity({ invoiceId: id, type: "payment_recorded", channel: "manual", method: body.method ?? "manual", amount: body.amount });
     const invoicePayments = await db.select().from(payments).where(eq(payments.invoiceId, id));
     const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
     const totalPaid = invoicePayments.reduce((s, p) => s + p.amount, 0);
     if (invoice && totalPaid >= invoice.total) {
-      await db.update(invoices).set({ status: "paid", paidAt: new Date() }).where(eq(invoices.id, id));
+      await changeInvoiceStatus(id, "paid", { channel: "manual", type: "status_changed" });
       const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
-      await sendEmail({
+      await sendTrackedEmail({
         to: COMPANY.adminEmail,
         subject: `Invoice paid — ${invoice.invoiceNumber}`,
         html: buildAdminInvoicePaidHtml({
@@ -280,6 +301,7 @@ export const invoicesRoute = new Hono()
     const id = Number(c.req.param("id"));
     const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
     if (!invoice) return c.json({ message: "Not found" }, 404);
+    if (invoice.status === "paid" || invoice.status === "cancelled") return c.json({ message: "Invoice is already paid or cancelled" }, 400);
     const items = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, id));
     const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
     if (!client?.email) return c.json({ message: "Client has no email" }, 400);
@@ -303,8 +325,13 @@ export const invoicesRoute = new Hono()
 
     // "Send Invoice" = email the invoice document (PDF). No payment link is created here;
     // "Send Payment Link" is a separate, dedicated endpoint (/send-payment-link).
-    await sendEmail({
+    await sendTrackedEmail({
       to: client.email,
+      recipientName: client.name,
+      clientId: client.id,
+      invoiceId: id,
+      bookingId: invoice.bookingId ?? null,
+      type: "invoice",
       subject: `Invoice ${invoice.invoiceNumber} — Studio Daï Oakes`,
       html: buildInvoiceEmailHtml({
         clientName: client.name,
@@ -316,7 +343,7 @@ export const invoicesRoute = new Hono()
       attachments: [{ filename: `invoice-${invoice.invoiceNumber}.pdf`, content: pdfBuffer }],
     });
 
-    await db.update(invoices).set({ status: "sent" }).where(eq(invoices.id, id));
+    await changeInvoiceStatus(id, "sent", { channel: "admin", type: "sent" });
     return c.json({ success: true }, 200);
   })
   .post("/:id/send-payment-link", requireAuth, async (c) => {
@@ -337,8 +364,13 @@ export const invoicesRoute = new Hono()
     if (!checkoutUrl) return c.json({ message: "Stripe not configured or could not create payment link" }, 500);
 
     // "Send Payment Link" = email only the payment link (no invoice PDF attachment).
-    await sendEmail({
+    await sendTrackedEmail({
       to: client.email,
+      recipientName: client.name,
+      clientId: client.id,
+      invoiceId: id,
+      bookingId: invoice.bookingId ?? null,
+      type: "payment_link",
       subject: `Payment link for invoice ${invoice.invoiceNumber} — Studio Daï Oakes`,
       html: buildPaymentLinkEmailHtml({
         clientName: client.name,
@@ -348,7 +380,7 @@ export const invoicesRoute = new Hono()
       }),
     });
 
-    await db.update(invoices).set({ status: "sent" }).where(eq(invoices.id, id));
+    await changeInvoiceStatus(id, "sent", { channel: "admin", type: "payment_link_sent" });
     return c.json({ success: true, checkoutUrl }, 200);
   })
   .post("/:id/checkout", requireAuth, async (c) => {
@@ -365,11 +397,20 @@ export const invoicesRoute = new Hono()
     const checkoutUrl = await getOrCreateCheckoutUrl(invoice, client, origin);
     if (!checkoutUrl) return c.json({ message: "Stripe not configured or could not create checkout" }, 500);
 
+    await recordInvoiceActivity({
+      invoiceId: id,
+      type: "payment_link_created",
+      channel: "admin",
+      amount: invoice.total,
+      metadata: { checkoutUrl },
+    });
+
     return c.json({ checkoutUrl }, 200);
   })
   .put("/:id/edit", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
     const body = await c.req.json();
+    const [prevInvoice] = await db.select().from(invoices).where(eq(invoices.id, id));
     const { lineItems, subtotal, vatTotal, total } = computeTotals(body.items);
 
     const [invoice] = await db
@@ -404,6 +445,15 @@ export const invoicesRoute = new Hono()
         amount: item.amount,
       });
     }
+
+    await recordInvoiceActivity({
+      invoiceId: id,
+      type: prevInvoice && prevInvoice.status !== body.status ? "status_changed" : "edited",
+      oldStatus: prevInvoice?.status ?? null,
+      newStatus: body.status,
+      channel: "admin",
+      amount: total,
+    });
 
     return c.json({ invoice }, 200);
   })

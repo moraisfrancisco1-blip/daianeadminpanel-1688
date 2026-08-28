@@ -11,6 +11,7 @@ import BookingManualPage from "./pages/booking-manual";
 import RemindersPage from "./pages/reminders";
 import ExportsPage from "./pages/exports";
 import ReportsPage from "./pages/reports";
+import EmailHistoryPage from "./pages/email-history";
 import CalendarPage from "./pages/calendar";
 import MessagesPage from "./pages/messages";
 import PackagesPage from "./pages/packages";
@@ -37,6 +38,7 @@ function App() {
         <Route path="/messages" component={MessagesPage} />
         <Route path="/packages" component={PackagesPage} />
         <Route path="/exports" component={ExportsPage} />
+        <Route path="/emails" component={EmailHistoryPage} />
         <Route path="/book" component={BookPage} />
         <Route path="/book/confirmed" component={BookConfirmedPage} />
       </Switch>

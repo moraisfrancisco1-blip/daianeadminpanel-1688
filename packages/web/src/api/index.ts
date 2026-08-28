@@ -14,6 +14,7 @@ import { googleCalendarRoute } from "./routes/google-calendar";
 import { stripeWebhookRoute } from "./routes/stripe-webhook";
 import { reportsRoute } from "./routes/reports";
 import { packagesRoute } from "./routes/packages";
+import { emailsRoute } from "./routes/emails";
 
 const app = new Hono()
   .use(cors({ origin: (origin) => origin ?? "*", credentials: true, exposeHeaders: ["set-auth-token"] }))
@@ -37,6 +38,7 @@ const app = new Hono()
   .route("/dashboard", dashboardRoute)
   .route("/reports", reportsRoute)
   .route("/packages", packagesRoute)
+  .route("/emails", emailsRoute)
   .route("/google-calendar", googleCalendarRoute);
 
 export type AppType = typeof app;

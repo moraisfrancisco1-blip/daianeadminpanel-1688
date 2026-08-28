@@ -13,6 +13,7 @@ import {
   BarChart3,
   MessageCircle,
   Layers,
+  Mail,
   LogOut,
   Menu,
   X,
@@ -31,6 +32,7 @@ const NAV = [
   { href: "/reminders", label: "Reminders", icon: BellRing },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/messages", label: "Messages", icon: MessageCircle },
+  { href: "/emails", label: "Email History", icon: Mail },
   { href: "/packages", label: "Packages", icon: Layers },
   { href: "/exports", label: "Exports", icon: Download },
 ];

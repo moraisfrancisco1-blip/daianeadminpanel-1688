@@ -5,6 +5,7 @@ import { eq, desc, and, inArray } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { stripe } from "../services/stripe";
 import { sendEmail } from "../services/email";
+import { sendTrackedEmail } from "../services/email-log";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildRemainderPaymentEmailHtml } from "../lib/email-templates";
 import { nextNumber } from "../lib/counters";
 import { computeVat } from "../lib/totals";
@@ -192,7 +193,7 @@ export const bookingsRoute = new Hono()
           .returning();
       }
 
-      await sendEmail({
+      await sendTrackedEmail({
         to: booking!.email,
         subject: "Booking confirmed — Studio Daï Oakes",
         html: buildBookingConfirmationHtml({
@@ -209,7 +210,7 @@ export const bookingsRoute = new Hono()
         }),
       });
 
-      await sendEmail({
+      await sendTrackedEmail({
         to: COMPANY.adminEmail,
         subject: `New booking — ${booking!.name} (${service.name})`,
         html: buildAdminNewBookingHtml({
@@ -275,7 +276,7 @@ export const bookingsRoute = new Hono()
           .returning();
       }
 
-      await sendEmail({
+      await sendTrackedEmail({
         to: booking!.email,
         subject: "Booking confirmed — Studio Daï Oakes",
         html: buildBookingConfirmationHtml({
@@ -292,7 +293,7 @@ export const bookingsRoute = new Hono()
         }),
       });
 
-      await sendEmail({
+      await sendTrackedEmail({
         to: COMPANY.adminEmail,
         subject: `New booking — ${booking!.name} (${service.name})`,
         html: buildAdminNewBookingHtml({
@@ -462,7 +463,7 @@ export const bookingsRoute = new Hono()
     }
 
     // Send confirmation emails
-    await sendEmail({
+    await sendTrackedEmail({
       to: booking!.email,
       subject: "Booking confirmed — Studio Daï Oakes",
       html: buildBookingConfirmationHtml({
@@ -480,7 +481,7 @@ export const bookingsRoute = new Hono()
       }),
     });
 
-    await sendEmail({
+    await sendTrackedEmail({
       to: COMPANY.adminEmail,
       subject: `New booking — ${booking!.name} (${service.name})`,
       html: buildAdminNewBookingHtml({
@@ -659,7 +660,7 @@ export const bookingsRoute = new Hono()
     
     // Send remainder payment email
     const checkoutUrl = session.url ?? `${origin}/bookings`;
-    await sendEmail({
+    await sendTrackedEmail({
       to: booking.email,
       subject: "Payment reminder — Studio Daï Oakes",
       html: buildRemainderPaymentEmailHtml({
@@ -821,7 +822,7 @@ export const bookingsRoute = new Hono()
 
           const isFullPayment = booking.payFullNow && booking.depositAmount >= (service?.price ?? 0);
 
-          await sendEmail({
+          await sendTrackedEmail({
             to: booking.email,
             subject: "Booking confirmed — Studio Daï Oakes",
             html: buildBookingConfirmationHtml({
@@ -838,7 +839,7 @@ export const bookingsRoute = new Hono()
             }),
           });
 
-          await sendEmail({
+          await sendTrackedEmail({
             to: COMPANY.adminEmail,
             subject: `New booking — ${booking.name} (${service?.name ?? "Session"})`,
             html: buildAdminNewBookingHtml({

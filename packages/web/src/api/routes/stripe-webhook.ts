@@ -8,7 +8,8 @@ import { eq } from "drizzle-orm";
 import { nextNumber } from "../lib/counters";
 import { computeVat, DEFAULT_VAT_RATE } from "../lib/totals";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml } from "../lib/email-templates";
-import { sendEmail } from "../services/email";
+import { sendTrackedEmail } from "../services/email-log";
+import { changeInvoiceStatus, recordInvoiceActivity } from "../services/invoice-activity";
 import { COMPANY } from "../lib/company";
 import { createCalendarEvent } from "../services/google-calendar";
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
@@ -233,11 +234,23 @@ stripeWebhookRoute.post("/", async (c) => {
         }
 
         if (invoiceId) {
-          await recordStripePayment(pi.id, invoiceId, amount, new Date(pi.created * 1000));
-          await db
-            .update(invoices)
-            .set({ status: "paid", paidAt: new Date(pi.created * 1000), stripePaymentIntentId: pi.id })
-            .where(eq(invoices.id, invoiceId));
+          const created = await recordStripePayment(pi.id, invoiceId, amount, new Date(pi.created * 1000));
+          await changeInvoiceStatus(invoiceId, "paid", {
+            channel: "stripe",
+            type: "paid",
+            paidAt: new Date(pi.created * 1000),
+            metadata: { paymentIntentId: pi.id },
+          });
+          if (created) {
+            await recordInvoiceActivity({
+              invoiceId,
+              type: "payment_confirmed",
+              channel: "stripe",
+              amount,
+              method: "stripe",
+              metadata: { paymentIntentId: pi.id },
+            });
+          }
           break;
         }
 
@@ -284,7 +297,9 @@ stripeWebhookRoute.post("/", async (c) => {
           amount: net,
         });
 
+        await recordInvoiceActivity({ invoiceId: invoice!.id, type: "created", newStatus: "paid", channel: "stripe", amount, metadata: { paymentIntentId: pi.id } });
         await recordStripePayment(pi.id, invoice!.id, amount, new Date(pi.created * 1000));
+        await recordInvoiceActivity({ invoiceId: invoice!.id, type: "payment_confirmed", channel: "stripe", amount, method: "stripe", metadata: { paymentIntentId: pi.id } });
         break;
       }
 
@@ -314,9 +329,27 @@ stripeWebhookRoute.post("/", async (c) => {
           if (invoice) {
             await db
               .update(invoices)
-              .set({ status: "paid", paidAt: new Date(), stripePaymentIntentId: paymentIntentId ?? invoice.stripePaymentIntentId, stripeCheckoutSessionId: session.id })
+              .set({ stripePaymentIntentId: paymentIntentId ?? invoice.stripePaymentIntentId, stripeCheckoutSessionId: session.id })
               .where(eq(invoices.id, invoice.id));
-            if (paymentIntentId) await recordStripePayment(paymentIntentId, invoice.id, amountPaid, new Date());
+            await changeInvoiceStatus(invoice.id, "paid", {
+              channel: "stripe",
+              type: "paid",
+              paidAt: new Date(),
+              metadata: { paymentIntentId, checkoutSessionId: session.id, invoiceNumber: invoice.invoiceNumber },
+            });
+            if (paymentIntentId) {
+              const created = await recordStripePayment(paymentIntentId, invoice.id, amountPaid, new Date());
+              if (created) {
+                await recordInvoiceActivity({
+                  invoiceId: invoice.id,
+                  type: "payment_confirmed",
+                  channel: "stripe",
+                  amount: amountPaid,
+                  method: "stripe",
+                  metadata: { paymentIntentId, checkoutSessionId: session.id },
+                });
+              }
+            }
             if (bookingId) {
               await db.update(bookings).set({ invoiceId: invoice.id, status: "confirmed", depositStatus: "paid" }).where(eq(bookings.id, bookingId));
             }
@@ -401,14 +434,24 @@ stripeWebhookRoute.post("/", async (c) => {
         // Link the invoice to the booking (also powers idempotency on retries).
         await db.update(bookings).set({ invoiceId: invoice!.id }).where(eq(bookings.id, bookingId));
 
+        await recordInvoiceActivity({ invoiceId: invoice!.id, type: "created", newStatus: "paid", channel: "stripe", amount, metadata: { paymentIntentId } });
+
         // Record the payment (idempotent — never duplicates).
         if (paymentIntentId) {
-          await recordStripePayment(paymentIntentId, invoice!.id, amount, new Date());
+          const created = await recordStripePayment(paymentIntentId, invoice!.id, amount, new Date());
+          if (created) {
+            await recordInvoiceActivity({ invoiceId: invoice!.id, type: "payment_confirmed", channel: "stripe", amount, method: "stripe", metadata: { paymentIntentId } });
+          }
         }
 
         // Send confirmation emails
-        await sendEmail({
+        await sendTrackedEmail({
           to: booking.email,
+          recipientName: booking.name,
+          bookingId: booking.id,
+          clientId: client!.id,
+          invoiceId: invoice!.id,
+          type: "booking_confirmation",
           subject: "Booking confirmed — Studio Daï Oakes",
           html: buildBookingConfirmationHtml({
             name: booking.name,
@@ -424,8 +467,13 @@ stripeWebhookRoute.post("/", async (c) => {
           }),
         });
 
-        await sendEmail({
+        await sendTrackedEmail({
           to: COMPANY.adminEmail,
+          recipientName: booking.name,
+          bookingId: booking.id,
+          clientId: client!.id,
+          invoiceId: invoice!.id,
+          type: "other",
           subject: `New booking — ${booking.name} (${service?.name ?? "Session"})`,
           html: buildAdminNewBookingHtml({
             clientName: booking.name,

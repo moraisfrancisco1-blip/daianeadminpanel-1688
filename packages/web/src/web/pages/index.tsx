@@ -79,6 +79,7 @@ function DashboardContent() {
   const todayData = useQuery({
     queryKey: ["dashboard-today"],
     queryFn: async (): Promise<any> => (await api.dashboard.today.$get()).json(),
+    refetchInterval: 60000,
   });
   const alertsData = useQuery({
     queryKey: ["dashboard-alerts"],
@@ -171,6 +172,12 @@ function DashboardContent() {
                 <p className="font-medium">
                   {todayData.data.nextClient.startTime} · {todayData.data.nextClient.name} — {todayData.data.nextClient.serviceName}
                 </p>
+              </div>
+            )}
+            {todayData.data?.nextClient == null && (todayData.data?.confirmedCount ?? 0) > 0 && (
+              <div className="mt-3 pt-3 border-t border-border text-sm">
+                <p className="text-xs text-muted-foreground">Próximo cliente</p>
+                <p className="font-medium text-muted-foreground">No more clients today.</p>
               </div>
             )}
           </div>

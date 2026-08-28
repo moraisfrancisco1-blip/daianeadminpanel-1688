@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
@@ -8,7 +8,7 @@ import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
 import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, cmpNumberLike, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { netToGross } from "../../api/lib/totals";
-import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil, Link2, Copy, ExternalLink } from "lucide-react";
+import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil, Link2, Copy, ExternalLink, History } from "lucide-react";
 import { downloadFile } from "../lib/download";
 
 export default function InvoicesPage() {
@@ -73,6 +73,7 @@ function InvoicesContent() {
   const [search, setSearch] = useState("");
   const { sortKey, sortDir, toggle } = useSort<InvoiceSortKey>("date", "desc");
   const [paymentLinkInvoice, setPaymentLinkInvoice] = useState<InvoiceRow | null>(null);
+  const [historyInvoice, setHistoryInvoice] = useState<InvoiceRow | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
@@ -392,6 +393,14 @@ function InvoicesContent() {
                           <Send className="size-4" />
                         )}
                       </button>
+                      <button
+                        onClick={() => setHistoryInvoice(inv)}
+                        className="text-muted-foreground hover:text-primary"
+                        title="History"
+                      >
+                        <History className="size-4" />
+                      </button>
+
                       {inv.status !== "paid" && (
                         <button
                           onClick={() => requestPaymentLink(inv)}
@@ -550,6 +559,85 @@ function InvoicesContent() {
           </div>
         </div>
       )}
+
+      {historyInvoice && <InvoiceHistoryModal invoice={historyInvoice} onClose={() => setHistoryInvoice(null)} />}
+
+    </div>
+  );
+}
+
+function InvoiceHistoryModal({ invoice, onClose }: { invoice: InvoiceRow; onClose: () => void }) {
+  const detail = useQuery({
+    queryKey: ["invoice", "history", invoice.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/invoices/${invoice.id}`);
+      const data = await res.json();
+      return data as { invoice: any; activity: any[]; emails: any[]; payments: any[] };
+    },
+  });
+
+  const activity: any[] = detail.data?.activity ?? [];
+  const emails: any[] = detail.data?.emails ?? [];
+
+  type Entry = { ts: number; kind: "activity" | "email"; label: string; detail: string; tone?: string };
+  const entries: Entry[] = [
+    ...activity.map((a) => {
+      const labels: Record<string, string> = {
+        created: "Invoice created",
+        edited: "Invoice edited",
+        sent: "Invoice sent",
+        payment_link_created: "Payment link created",
+        payment_link_sent: "Payment link sent",
+        status_changed: "Status changed",
+        payment_recorded: "Payment recorded",
+        payment_confirmed: "Payment confirmed via Stripe",
+        email_failed: "Email failed",
+        cancelled: "Invoice cancelled",
+      };
+      let detailText = labels[a.type] ?? a.type;
+      if (a.type === "status_changed" && a.oldStatus && a.newStatus) detailText = `Status changed: ${a.oldStatus} → ${a.newStatus}`;
+      if (a.type === "payment_confirmed" || a.type === "payment_recorded") {
+        detailText = `€${(a.amount ?? 0).toFixed(2)}${a.method ? ` · ${a.method}` : ""}`;
+      }
+      return { ts: new Date(a.createdAt).getTime(), kind: "activity" as const, label: labels[a.type] ?? a.type, detail: detailText };
+    }),
+    ...emails.map((e) => ({
+      ts: new Date(e.createdAt).getTime(),
+      kind: "email" as const,
+      label: e.status === "failed" ? "Email failed" : "Email sent",
+      detail: `${e.type} · ${e.recipientEmail}${e.status === "failed" && e.error ? ` — ${e.error}` : ""}`,
+      tone: e.status === "failed" ? "text-destructive" : "text-[#4C7A56]",
+    })),
+  ];
+  entries.sort((a, b) => b.ts - a.ts);
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-card rounded-xl p-6 w-full max-w-lg space-y-4 relative max-h-[90vh] overflow-y-auto">
+        <button onClick={onClose} className="absolute top-4 right-4 text-muted-foreground">
+          <X className="size-4" />
+        </button>
+        <h2 className="font-display text-xl font-semibold">Invoice History · {invoice.invoiceNumber}</h2>
+        <p className="text-sm text-muted-foreground">Status: {invoice.status} · Total: €{invoice.total.toFixed(2)}</p>
+        {detail.isLoading ? (
+          <div className="py-8 text-center">
+            <Loader2 className="size-5 animate-spin mx-auto" />
+          </div>
+        ) : entries.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4">No history yet.</p>
+        ) : (
+          <ol className="space-y-3 border-l-2 border-border pl-4">
+            {entries.map((e, i) => (
+              <li key={i} className="relative">
+                <span className="absolute -left-[21px] top-1.5 size-2.5 rounded-full bg-brand-copper" />
+                <p className="text-xs text-muted-foreground">{new Date(e.ts).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+                <p className="font-medium">{e.label}</p>
+                <p className={`text-sm ${e.tone ?? "text-muted-foreground"}`}>{e.detail}</p>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
     </div>
   );
 }
