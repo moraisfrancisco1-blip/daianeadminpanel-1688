@@ -58,22 +58,24 @@ function MessagesContent() {
   const [copied, setCopied] = useState(false);
 
   const clientsQ = useQuery({
-    queryKey: ["clients"],
+    queryKey: ["messages-clients"],
     queryFn: async (): Promise<Client[]> => {
       const res = await api.clients.$get();
       return ((await res.json()) as { clients: Client[] }).clients;
     },
   });
   const servicesQ = useQuery({
-    queryKey: ["services"],
+    queryKey: ["messages-services"],
     queryFn: async (): Promise<Service[]> => {
       const res = await api.services.$get();
       return ((await res.json()) as { services: Service[] }).services;
     },
   });
 
-  const selectedClient = (clientsQ.data ?? []).find((c) => c.id === Number(clientId));
-  const selectedService = (servicesQ.data ?? []).find((s) => s.id === Number(serviceId));
+  const clientsList = Array.isArray(clientsQ.data) ? clientsQ.data : [];
+  const servicesList = Array.isArray(servicesQ.data) ? servicesQ.data : [];
+  const selectedClient = clientsList.find((c) => c.id === Number(clientId));
+  const selectedService = servicesList.find((s) => s.id === Number(serviceId));
 
   const message = useMemo(() => {
     const tpl = TEMPLATES.find((t) => t.id === templateId) ?? TEMPLATES[0];

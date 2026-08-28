@@ -115,7 +115,7 @@ function CalendarContent() {
   });
 
   const servicesQ = useQuery({
-    queryKey: ["services"],
+    queryKey: ["calendar-services"],
     staleTime: 0,
     refetchOnMount: "always",
     queryFn: async (): Promise<Service[]> => {
@@ -151,7 +151,8 @@ function CalendarContent() {
 
   const durationMap = useMemo(() => {
     const m = new Map<number, number>();
-    for (const s of servicesQ.data ?? []) m.set(s.id, s.durationMinutes);
+    const list = Array.isArray(servicesQ.data) ? servicesQ.data : [];
+    for (const s of list) m.set(s.id, s.durationMinutes);
     return m;
   }, [servicesQ.data]);
 
@@ -299,7 +300,7 @@ function CalendarContent() {
       {selectedBooking && (
         <BookingDetailModal
           booking={selectedBooking}
-          services={servicesQ.data ?? []}
+          services={Array.isArray(servicesQ.data) ? servicesQ.data : []}
           saving={updateBooking.isPending}
           onClose={() => setSelectedBooking(null)}
           onSave={(data) => updateBooking.mutate({ id: selectedBooking.id, data })}

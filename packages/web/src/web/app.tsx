@@ -1,4 +1,5 @@
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
+import { ErrorBoundary } from "./components/error-boundary";
 import Index from "./pages/index";
 import LoginPage from "./pages/login";
 import ClientsPage from "./pages/clients";
@@ -20,28 +21,31 @@ import { Provider } from "./components/provider";
 import { AgentFeedback } from "@runablehq/website-runtime";
 
 function App() {
+  const [location] = useLocation();
   return (
     <Provider>
-      <Switch>
-        <Route path="/" component={Index} />
-        <Route path="/login" component={LoginPage} />
-        <Route path="/clients" component={ClientsPage} />
-        <Route path="/clients/:id" component={ClientDetailPage} />
-        <Route path="/catalog" component={CatalogPage} />
-        <Route path="/quotes" component={QuotesPage} />
-        <Route path="/invoices" component={InvoicesPage} />
-        <Route path="/calendar" component={CalendarPage} />
-        <Route path="/bookings" component={BookingsPage} />
-        <Route path="/bookings/manual" component={BookingManualPage} />
-        <Route path="/reminders" component={RemindersPage} />
-        <Route path="/reports" component={ReportsPage} />
-        <Route path="/messages" component={MessagesPage} />
-        <Route path="/packages" component={PackagesPage} />
-        <Route path="/exports" component={ExportsPage} />
-        <Route path="/emails" component={EmailHistoryPage} />
-        <Route path="/book" component={BookPage} />
-        <Route path="/book/confirmed" component={BookConfirmedPage} />
-      </Switch>
+      <ErrorBoundary key={location}>
+        <Switch>
+          <Route path="/" component={Index} />
+          <Route path="/login" component={LoginPage} />
+          <Route path="/clients" component={ClientsPage} />
+          <Route path="/clients/:id" component={ClientDetailPage} />
+          <Route path="/catalog" component={CatalogPage} />
+          <Route path="/quotes" component={QuotesPage} />
+          <Route path="/invoices" component={InvoicesPage} />
+          <Route path="/calendar" component={CalendarPage} />
+          <Route path="/bookings" component={BookingsPage} />
+          <Route path="/bookings/manual" component={BookingManualPage} />
+          <Route path="/reminders" component={RemindersPage} />
+          <Route path="/reports" component={ReportsPage} />
+          <Route path="/messages" component={MessagesPage} />
+          <Route path="/packages" component={PackagesPage} />
+          <Route path="/exports" component={ExportsPage} />
+          <Route path="/emails" component={EmailHistoryPage} />
+          <Route path="/book" component={BookPage} />
+          <Route path="/book/confirmed" component={BookConfirmedPage} />
+        </Switch>
+      </ErrorBoundary>
       {/* Do not remove — off by default, activated by parent iframe via postMessage */}
       {import.meta.env.DEV && <AgentFeedback />}
     </Provider>
