@@ -241,6 +241,10 @@ stripeWebhookRoute.post("/", async (c) => {
             paidAt: new Date(pi.created * 1000),
             metadata: { paymentIntentId: pi.id },
           });
+          await db
+            .update(invoices)
+            .set({ stripePaymentIntentStatus: "succeeded", lastStripeVerifiedAt: new Date() })
+            .where(eq(invoices.id, invoiceId));
           if (created) {
             await recordInvoiceActivity({
               invoiceId,
@@ -329,7 +333,13 @@ stripeWebhookRoute.post("/", async (c) => {
           if (invoice) {
             await db
               .update(invoices)
-              .set({ stripePaymentIntentId: paymentIntentId ?? invoice.stripePaymentIntentId, stripeCheckoutSessionId: session.id })
+              .set({
+                stripePaymentIntentId: paymentIntentId ?? invoice.stripePaymentIntentId,
+                stripeCheckoutSessionId: session.id,
+                stripeCheckoutStatus: "complete",
+                stripePaymentIntentStatus: "succeeded",
+                lastStripeVerifiedAt: new Date(),
+              })
               .where(eq(invoices.id, invoice.id));
             await changeInvoiceStatus(invoice.id, "paid", {
               channel: "stripe",
@@ -521,6 +531,22 @@ stripeWebhookRoute.post("/", async (c) => {
         await markWebhookEventProcessed(event.id);
         processingEventId = null;
 
+        break;
+      }
+
+      case "checkout.session.expired": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        console.log("[stripe-webhook] Checkout session expired:", session.id);
+        const [expiredInvoice] = await db
+          .select()
+          .from(invoices)
+          .where(eq(invoices.stripeCheckoutSessionId, session.id));
+        if (expiredInvoice && expiredInvoice.status !== "paid") {
+          await db
+            .update(invoices)
+            .set({ stripeCheckoutStatus: "expired", lastStripeVerifiedAt: new Date() })
+            .where(eq(invoices.id, expiredInvoice.id));
+        }
         break;
       }
 

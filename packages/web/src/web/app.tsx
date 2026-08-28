@@ -13,6 +13,7 @@ import RemindersPage from "./pages/reminders";
 import ExportsPage from "./pages/exports";
 import ReportsPage from "./pages/reports";
 import EmailHistoryPage from "./pages/email-history";
+import PaymentControlPage from "./pages/payment-control";
 import CalendarPage from "./pages/calendar";
 import MessagesPage from "./pages/messages";
 import PackagesPage from "./pages/packages";
@@ -33,6 +34,7 @@ function App() {
           <Route path="/catalog" component={CatalogPage} />
           <Route path="/quotes" component={QuotesPage} />
           <Route path="/invoices" component={InvoicesPage} />
+          <Route path="/payment-control" component={PaymentControlPage} />
           <Route path="/calendar" component={CalendarPage} />
           <Route path="/bookings" component={BookingsPage} />
           <Route path="/bookings/manual" component={BookingManualPage} />
