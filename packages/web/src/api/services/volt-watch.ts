@@ -23,6 +23,8 @@ const LEVEL_BY_SEVERITY: Record<WatchSeverity, "CRITICAL" | "ERROR" | "WARNING" 
   info: "INFO",
 };
 
+let registrationPromise: Promise<boolean> | null = null;
+
 function enabled(): boolean {
   return process.env.VOLT_WATCH_ENABLED === "true"
     && Boolean(process.env.VOLT_WATCH_URL)
@@ -54,11 +56,44 @@ function buildMessage(event: WatchEvent): string {
   );
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function registerSystem(url: string, headers: Record<string, string>, environment: string): Promise<boolean> {
+  if (registrationPromise) return registrationPromise;
+
+  registrationPromise = fetchWithTimeout(`${url}/api/v1/systems`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ name: SYSTEM_NAME, environment }),
+  })
+    .then((response) => {
+      if (!response.ok) {
+        console.error("[volt-watch] system registration rejected", response.status);
+        registrationPromise = null;
+        return false;
+      }
+      return true;
+    })
+    .catch((err) => {
+      console.error("[volt-watch] system registration failed", err instanceof Error ? err.message : err);
+      registrationPromise = null;
+      return false;
+    });
+
+  return registrationPromise;
+}
+
 export function reportVoltWatchEvent(event: WatchEvent): void {
   if (!enabled()) return;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   const url = process.env.VOLT_WATCH_URL!.replace(/\/$/, "");
   const environment = process.env.VOLT_WATCH_ENVIRONMENT ?? "production";
   const headers = {
@@ -67,22 +102,12 @@ export function reportVoltWatchEvent(event: WatchEvent): void {
   };
 
   void (async () => {
-    const registration = await fetch(`${url}/api/v1/systems`, {
+    const registered = await registerSystem(url, headers, environment);
+    if (!registered) return;
+
+    const response = await fetchWithTimeout(`${url}/api/v1/watch/events`, {
       method: "POST",
       headers,
-      signal: controller.signal,
-      body: JSON.stringify({ name: SYSTEM_NAME, environment }),
-    });
-
-    if (!registration.ok) {
-      console.error("[volt-watch] system registration rejected", registration.status);
-      return;
-    }
-
-    const response = await fetch(`${url}/api/v1/watch/events`, {
-      method: "POST",
-      headers,
-      signal: controller.signal,
       body: JSON.stringify({
         system: SYSTEM_NAME,
         level: LEVEL_BY_SEVERITY[event.severity],
@@ -91,9 +116,7 @@ export function reportVoltWatchEvent(event: WatchEvent): void {
     });
 
     if (!response.ok) console.error("[volt-watch] event rejected", response.status);
-  })()
-    .catch((err) => {
-      console.error("[volt-watch] report failed", err instanceof Error ? err.message : err);
-    })
-    .finally(() => clearTimeout(timeout));
+  })().catch((err) => {
+    console.error("[volt-watch] report failed", err instanceof Error ? err.message : err);
+  });
 }
