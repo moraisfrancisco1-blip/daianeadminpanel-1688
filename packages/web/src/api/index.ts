@@ -21,6 +21,8 @@ import { reportVoltWatchEvent } from "./services/volt-watch";
 
 const app = new Hono()
   .use(cors({ origin: (origin) => origin ?? "*", credentials: true, exposeHeaders: ["set-auth-token"] }))
+  // Public health endpoint for external uptime monitoring. No customer data is exposed.
+  .get("/api/health", (c) => c.json({ status: "ok", service: "daiane-oakes-admin" }, 200))
   .on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
   // Stripe webhook must be registered BEFORE auth middleware (no auth required)
   .route("/api/stripe-webhook", stripeWebhookRoute)
@@ -41,7 +43,6 @@ const app = new Hono()
     });
     return c.json({ message: err instanceof Error ? err.message : "Internal server error" }, 500);
   })
-  .get("/health", (c) => c.json({ status: "ok" }, 200))
   .route("/clients", clientsRoute)
   .route("/services", servicesRoute)
   .route("/quotes", quotesRoute)
