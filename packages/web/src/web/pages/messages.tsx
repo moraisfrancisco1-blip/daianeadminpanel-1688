@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
-import { Copy, MessageCircle, Mail, Check } from "lucide-react";
+import { Copy, MessageCircle, Mail, Check, Smartphone } from "lucide-react";
 
 type Client = { id: number; name: string; email: string | null; phone: string | null };
 type Service = { id: number; name: string };
@@ -56,6 +56,7 @@ function MessagesContent() {
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [copied, setCopied] = useState(false);
+  const [smsStatus, setSmsStatus] = useState<string>("");
 
   const clientsQ = useQuery({
     queryKey: ["messages-clients"],
@@ -98,6 +99,18 @@ function MessagesContent() {
     ? `mailto:${selectedClient.email}?subject=${encodeURIComponent("Studio Daï Oakes")}&body=${encodeURIComponent(message)}`
     : null;
 
+  const smsMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedClient?.phone) throw new Error("O cliente não tem número de telefone.");
+      const res = await api.sms.send.$post({ json: { to: selectedClient.phone, message } });
+      const data = (await res.json()) as { success?: boolean; message?: string };
+      if (!res.ok || !data.success) throw new Error(data.message ?? "Não foi possível enviar o SMS.");
+      return data;
+    },
+    onSuccess: () => setSmsStatus("SMS enviado com sucesso."),
+    onError: (error) => setSmsStatus(error instanceof Error ? error.message : "Não foi possível enviar o SMS."),
+  });
+
   return (
     <div className="space-y-6">
       <div>
@@ -127,6 +140,7 @@ function MessagesContent() {
               value={clientId}
               onChange={(e) => {
                 setClientId(e.target.value);
+                setSmsStatus("");
                 const c = (clientsQ.data ?? []).find((x) => x.id === Number(e.target.value));
                 if (c) setName(c.name);
               }}
@@ -196,6 +210,17 @@ function MessagesContent() {
             >
               {copied ? <Check className="size-4 text-[#4C7A56]" /> : <Copy className="size-4" />} {copied ? "Copiado!" : "Copiar"}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSmsStatus("");
+                smsMutation.mutate();
+              }}
+              disabled={!selectedClient?.phone || smsMutation.isPending}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium bg-brand-teal text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Smartphone className="size-4" /> {smsMutation.isPending ? "A enviar..." : "Enviar SMS"}
+            </button>
             {waLink && (
               <a
                 href={waLink}
@@ -215,6 +240,9 @@ function MessagesContent() {
               </a>
             )}
           </div>
+          {smsStatus && (
+            <p className={`text-sm ${smsStatus === "SMS enviado com sucesso." ? "text-green-700" : "text-red-600"}`}>{smsStatus}</p>
+          )}
           {!selectedClient?.phone && !selectedClient?.email && (
             <p className="text-xs text-muted-foreground">
               Selecione um cliente com telefone ou email para abrir WhatsApp/Email diretamente.
@@ -225,4 +253,3 @@ function MessagesContent() {
     </div>
   );
 }
-
