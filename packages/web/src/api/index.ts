@@ -16,6 +16,7 @@ import { reportsRoute } from "./routes/reports";
 import { packagesRoute } from "./routes/packages";
 import { emailsRoute } from "./routes/emails";
 import { paymentControlRoute } from "./routes/payment-control";
+import { smsRoute } from "./routes/sms";
 import { reportVoltWatchEvent } from "./services/volt-watch";
 
 const app = new Hono()
@@ -53,7 +54,8 @@ const app = new Hono()
   .route("/packages", packagesRoute)
   .route("/emails", emailsRoute)
   .route("/payment-control", paymentControlRoute)
-  .route("/google-calendar", googleCalendarRoute);
+  .route("/google-calendar", googleCalendarRoute)
+  .route("/sms", smsRoute);
 
 export type AppType = typeof app;
 export default app;
