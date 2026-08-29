@@ -13,6 +13,15 @@ const DEFAULT_TIMEOUT_MS = 2500;
 const MAX_MESSAGE_LENGTH = 1000;
 const MAX_TITLE_LENGTH = 255;
 const MAX_METADATA_KEYS = 12;
+const SYSTEM_NAME = "daiane-oakes-admin";
+
+const LEVEL_BY_SEVERITY: Record<WatchSeverity, "CRITICAL" | "ERROR" | "WARNING" | "INFO"> = {
+  critical: "CRITICAL",
+  high: "ERROR",
+  medium: "WARNING",
+  low: "INFO",
+  info: "INFO",
+};
 
 function enabled(): boolean {
   return process.env.VOLT_WATCH_ENABLED === "true"
@@ -36,35 +45,53 @@ function cleanMetadata(metadata?: Record<string, unknown>): Record<string, unkno
   return Object.keys(result).length ? result : undefined;
 }
 
+function buildMessage(event: WatchEvent): string {
+  const metadata = cleanMetadata(event.metadata);
+  const context = metadata ? ` | context=${JSON.stringify(metadata)}` : "";
+  return cleanText(
+    `[${cleanText(event.eventType, 120)}] ${cleanText(event.title, MAX_TITLE_LENGTH)}: ${cleanText(event.message, MAX_MESSAGE_LENGTH)}${context}`,
+    MAX_MESSAGE_LENGTH,
+  );
+}
+
 export function reportVoltWatchEvent(event: WatchEvent): void {
   if (!enabled()) return;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   const url = process.env.VOLT_WATCH_URL!.replace(/\/$/, "");
+  const environment = process.env.VOLT_WATCH_ENVIRONMENT ?? "production";
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Volt-Key": process.env.VOLT_WATCH_KEY!,
+  };
 
-  void fetch(`${url}/api/events`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Volt-Key": process.env.VOLT_WATCH_KEY!,
-    },
-    signal: controller.signal,
-    body: JSON.stringify({
-      system_id: "daiane-oakes-admin",
-      system_name: "Daiane Oakes Admin Panel",
-      environment: process.env.VOLT_WATCH_ENVIRONMENT ?? "production",
-      severity: event.severity,
-      event_type: cleanText(event.eventType, 120),
-      title: cleanText(event.title, MAX_TITLE_LENGTH),
-      message: cleanText(event.message, MAX_MESSAGE_LENGTH),
-      source: event.source ?? "admin-api",
-      metadata: cleanMetadata(event.metadata),
-    }),
-  })
-    .then((response) => {
-      if (!response.ok) console.error("[volt-watch] event rejected", response.status);
-    })
+  void (async () => {
+    const registration = await fetch(`${url}/api/v1/systems`, {
+      method: "POST",
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({ name: SYSTEM_NAME, environment }),
+    });
+
+    if (!registration.ok) {
+      console.error("[volt-watch] system registration rejected", registration.status);
+      return;
+    }
+
+    const response = await fetch(`${url}/api/v1/watch/events`, {
+      method: "POST",
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        system: SYSTEM_NAME,
+        level: LEVEL_BY_SEVERITY[event.severity],
+        message: buildMessage(event),
+      }),
+    });
+
+    if (!response.ok) console.error("[volt-watch] event rejected", response.status);
+  })()
     .catch((err) => {
       console.error("[volt-watch] report failed", err instanceof Error ? err.message : err);
     })
