@@ -16,6 +16,7 @@ import { reportsRoute } from "./routes/reports";
 import { packagesRoute } from "./routes/packages";
 import { emailsRoute } from "./routes/emails";
 import { paymentControlRoute } from "./routes/payment-control";
+import { reportVoltWatchEvent } from "./services/volt-watch";
 
 const app = new Hono()
   .use(cors({ origin: (origin) => origin ?? "*", credentials: true, exposeHeaders: ["set-auth-token"] }))
@@ -26,6 +27,17 @@ const app = new Hono()
   .use("*", authMiddleware)
   .onError((err, c) => {
     console.error("[api error]", err);
+    reportVoltWatchEvent({
+      severity: "high",
+      eventType: "api_error",
+      title: "Admin API error",
+      message: err instanceof Error ? err.message : "Internal server error",
+      source: "admin-api",
+      metadata: {
+        method: c.req.method,
+        path: new URL(c.req.url).pathname,
+      },
+    });
     return c.json({ message: err instanceof Error ? err.message : "Internal server error" }, 500);
   })
   .get("/health", (c) => c.json({ status: "ok" }, 200))
