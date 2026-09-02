@@ -17,6 +17,9 @@ export const clients = sqliteTable("clients", {
   country: text("country"),
   dateOfBirth: integer("date_of_birth", { mode: "timestamp" }),
   notes: text("notes"),
+  // Health/session-related notes (e.g. areas of tension, contraindications) —
+  // kept separate from the general `notes` field above.
+  clinicalNotes: text("clinical_notes"),
   debtorNumber: text("debtor_number"),
   stripeCustomerId: text("stripe_customer_id").unique(),
   createdAt: integer("created_at", { mode: "timestamp" })

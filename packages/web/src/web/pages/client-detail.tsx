@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Link, useParams } from "wouter";
-import { ArrowLeft, Mail, Phone, MapPin, Euro, CalendarClock, FileText, Receipt, StickyNote, Check } from "lucide-react";
+import { ArrowLeft, Mail, Phone, MapPin, Euro, CalendarClock, FileText, Receipt, StickyNote, Check, HeartPulse, Save } from "lucide-react";
 import { StatusPill } from "../components/status-pill";
 
 type Client = {
@@ -15,6 +15,7 @@ type Client = {
   city: string | null;
   country: string | null;
   notes: string | null;
+  clinicalNotes: string | null;
   createdAt: string;
 };
 type Invoice = { id: number; invoiceNumber: string; status: string; issueDate: string; dueDate: string; total: number; paidAt: string | null };
@@ -47,6 +48,8 @@ function ClientDetailContent() {
   const id = params.id ?? "";
   const qc = useQueryClient();
   const [newNote, setNewNote] = useState("");
+  const clinicalNotesRef = useRef<HTMLTextAreaElement>(null);
+  const [clinicalNotesSaved, setClinicalNotesSaved] = useState(false);
 
   const q = useQuery({
     queryKey: ["client", id],
@@ -84,6 +87,16 @@ function ClientDetailContent() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["client", id] });
       qc.invalidateQueries({ queryKey: ["dashboard-alerts"] });
+    },
+  });
+
+  const saveClinicalNotes = useMutation({
+    mutationFn: async (clinicalNotes: string) =>
+      (await api.clients[":id"].$put({ param: { id }, json: { clinicalNotes } } as any)).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["client", id] });
+      setClinicalNotesSaved(true);
+      setTimeout(() => setClinicalNotesSaved(false), 2000);
     },
   });
 
@@ -159,6 +172,29 @@ function ClientDetailContent() {
           <p className="text-sm whitespace-pre-wrap text-muted-foreground">{client.notes}</p>
         </div>
       )}
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="font-medium mb-3 flex items-center gap-2">
+          <HeartPulse className="size-4 text-brand-copper" /> Notas clínicas
+        </h3>
+        <textarea
+          ref={clinicalNotesRef}
+          defaultValue={client.clinicalNotes ?? ""}
+          placeholder="Zonas de tensão, contraindicações, historial de tratamento…"
+          rows={4}
+          className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm resize-none"
+        />
+        <div className="flex items-center gap-3 mt-2">
+          <button
+            onClick={() => saveClinicalNotes.mutate(clinicalNotesRef.current?.value ?? "")}
+            disabled={saveClinicalNotes.isPending}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground disabled:opacity-50"
+          >
+            <Save className="size-3.5" /> {saveClinicalNotes.isPending ? "A guardar…" : "Guardar"}
+          </button>
+          {clinicalNotesSaved && <span className="text-xs text-[#4C7A56]">Guardado.</span>}
+        </div>
+      </div>
 
       <div className="bg-card border border-border rounded-xl p-5">
         <h3 className="font-medium mb-3 flex items-center gap-2">

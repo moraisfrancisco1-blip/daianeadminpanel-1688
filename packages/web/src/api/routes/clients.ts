@@ -130,6 +130,7 @@ export const clientsRoute = new Hono()
         country: body.country ?? null,
         dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
         notes: body.notes ?? null,
+        clinicalNotes: body.clinicalNotes ?? null,
         debtorNumber: body.debtorNumber ?? null,
         stripeCustomerId,
       })
@@ -163,18 +164,23 @@ export const clientsRoute = new Hono()
       });
     }
     
+    // Fields the caller omits keep their current value — lets callers (like the
+    // client detail page's clinical notes editor) update just one field
+    // without having to resend the whole client record.
     const [client] = await db
       .update(clients)
       .set({
-        name: body.name,
-        email: body.email ?? null,
-        phone: body.phone ?? null,
-        address: body.address ?? null,
-        zipCode: body.zipCode ?? null,
-        city: body.city ?? null,
-        country: body.country ?? null,
-        dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
-        notes: body.notes ?? null,
+        name: body.name ?? existingClient.name,
+        email: body.email !== undefined ? body.email : existingClient.email,
+        phone: body.phone !== undefined ? body.phone : existingClient.phone,
+        address: body.address !== undefined ? body.address : existingClient.address,
+        zipCode: body.zipCode !== undefined ? body.zipCode : existingClient.zipCode,
+        city: body.city !== undefined ? body.city : existingClient.city,
+        country: body.country !== undefined ? body.country : existingClient.country,
+        dateOfBirth: body.dateOfBirth !== undefined ? (body.dateOfBirth ? new Date(body.dateOfBirth) : null) : existingClient.dateOfBirth,
+        notes: body.notes !== undefined ? body.notes : existingClient.notes,
+        clinicalNotes: body.clinicalNotes !== undefined ? body.clinicalNotes : existingClient.clinicalNotes,
+        debtorNumber: body.debtorNumber !== undefined ? body.debtorNumber : existingClient.debtorNumber,
         stripeCustomerId,
       })
       .where(eq(clients.id, id))
