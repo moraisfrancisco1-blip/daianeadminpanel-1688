@@ -24,6 +24,20 @@ export const clients = sqliteTable("clients", {
     .$defaultFn(() => new Date()),
 });
 
+// Timestamped follow-up notes on a client (separate from the single free-text
+// `clients.notes` field) — each one can be individually marked resolved and
+// surfaces as a dashboard reminder while unresolved.
+export const clientNotes = sqliteTable("client_notes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  clientId: integer("client_id").notNull(),
+  content: text("content").notNull(),
+  resolved: integer("resolved", { mode: "boolean" }).notNull().default(false),
+  resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export const services = sqliteTable("services", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),

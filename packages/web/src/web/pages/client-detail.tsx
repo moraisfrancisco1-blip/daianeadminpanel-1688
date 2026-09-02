@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Link, useParams } from "wouter";
-import { ArrowLeft, Mail, Phone, MapPin, Euro, CalendarClock, FileText, Receipt } from "lucide-react";
+import { ArrowLeft, Mail, Phone, MapPin, Euro, CalendarClock, FileText, Receipt, StickyNote, Check } from "lucide-react";
 import { StatusPill } from "../components/status-pill";
 
 type Client = {
@@ -31,6 +32,7 @@ type Booking = {
   depositAmount: number;
   depositStatus: string;
 };
+type ClientNote = { id: number; content: string; resolved: boolean; resolvedAt: string | null; createdAt: string };
 
 export default function ClientDetailPage() {
   return (
@@ -43,6 +45,8 @@ export default function ClientDetailPage() {
 function ClientDetailContent() {
   const params = useParams();
   const id = params.id ?? "";
+  const qc = useQueryClient();
+  const [newNote, setNewNote] = useState("");
 
   const q = useQuery({
     queryKey: ["client", id],
@@ -52,6 +56,7 @@ function ClientDetailContent() {
       quotes: Quote[];
       payments: Payment[];
       bookings: Booking[];
+      notes: ClientNote[];
     }> => {
       const res = await api.clients[":id"].$get({ param: { id } });
       return (await res.json()) as any;
@@ -59,12 +64,37 @@ function ClientDetailContent() {
     enabled: !!id,
   });
 
+  const addNote = useMutation({
+    mutationFn: async (content: string) =>
+      (await api.clients[":id"].notes.$post({ param: { id }, json: { content } } as any)).json(),
+    onSuccess: () => {
+      setNewNote("");
+      qc.invalidateQueries({ queryKey: ["client", id] });
+      qc.invalidateQueries({ queryKey: ["dashboard-alerts"] });
+    },
+  });
+
+  const resolveNote = useMutation({
+    mutationFn: async (noteId: number) =>
+      (
+        await api.clients[":id"].notes[":noteId"].resolve.$put({
+          param: { id, noteId: String(noteId) },
+        } as any)
+      ).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["client", id] });
+      qc.invalidateQueries({ queryKey: ["dashboard-alerts"] });
+    },
+  });
+
   if (q.isLoading) {
     return <div className="space-y-4">{[...Array(5)].map((_, i) => <div key={i} className="h-16 rounded-xl bg-muted animate-pulse" />)}</div>;
   }
   if (!q.data) return <p className="text-muted-foreground">Cliente não encontrado.</p>;
 
-  const { client, invoices, quotes, payments, bookings } = q.data;
+  const { client, invoices, quotes, payments, bookings, notes } = q.data;
+  const pendingNotes = notes.filter((n) => !n.resolved);
+  const resolvedNotes = notes.filter((n) => n.resolved);
 
   const paidTotal = invoices.filter((i) => i.status === "paid").reduce((s, i) => s + i.total, 0);
   const pendingTotal = invoices.filter((i) => i.status !== "paid" && i.status !== "cancelled").reduce((s, i) => s + i.total, 0);
@@ -129,6 +159,82 @@ function ClientDetailContent() {
           <p className="text-sm whitespace-pre-wrap text-muted-foreground">{client.notes}</p>
         </div>
       )}
+
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="font-medium mb-3 flex items-center gap-2">
+          <StickyNote className="size-4 text-brand-copper" /> Notas de acompanhamento
+        </h3>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const content = newNote.trim();
+            if (content) addNote.mutate(content);
+          }}
+          className="flex items-start gap-2 mb-4"
+        >
+          <textarea
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            placeholder="Escrever uma nota para tratar mais tarde…"
+            rows={2}
+            className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm resize-none"
+          />
+          <button
+            type="submit"
+            disabled={!newNote.trim() || addNote.isPending}
+            className="rounded-md bg-primary text-primary-foreground text-sm font-medium px-3 py-2 disabled:opacity-50 shrink-0"
+          >
+            Adicionar
+          </button>
+        </form>
+
+        {pendingNotes.length === 0 && resolvedNotes.length === 0 && (
+          <p className="text-sm text-muted-foreground">Sem notas ainda.</p>
+        )}
+
+        {pendingNotes.length > 0 && (
+          <div className="space-y-2 mb-3">
+            {pendingNotes.map((n) => (
+              <div
+                key={n.id}
+                className="flex items-start justify-between gap-3 rounded-lg border border-brand-bronze/30 bg-brand-bronze/5 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm whitespace-pre-wrap">{n.content}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{new Date(n.createdAt).toLocaleDateString("en-GB")}</p>
+                </div>
+                <button
+                  onClick={() => resolveNote.mutate(n.id)}
+                  disabled={resolveNote.isPending}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-brand-teal hover:underline shrink-0 disabled:opacity-50"
+                >
+                  <Check className="size-3.5" /> Tratada
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {resolvedNotes.length > 0 && (
+          <details className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground">
+              {resolvedNotes.length} nota{resolvedNotes.length === 1 ? "" : "s"} tratada{resolvedNotes.length === 1 ? "" : "s"}
+            </summary>
+            <div className="space-y-2 mt-2">
+              {resolvedNotes.map((n) => (
+                <div key={n.id} className="rounded-lg border border-border px-3 py-2 opacity-60">
+                  <p className="text-sm whitespace-pre-wrap line-through">{n.content}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {new Date(n.createdAt).toLocaleDateString("en-GB")}
+                    {n.resolvedAt && ` · tratada a ${new Date(n.resolvedAt).toLocaleDateString("en-GB")}`}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-card border border-border rounded-xl p-6">

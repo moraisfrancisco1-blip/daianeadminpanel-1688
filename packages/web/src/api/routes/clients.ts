@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { clients, invoices, bookings, payments, quotes, services } from "../database/schema";
+import { clients, invoices, bookings, payments, quotes, services, clientNotes } from "../database/schema";
 import { eq, desc, inArray, or } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { createStripeCustomer, updateStripeCustomer, findStripeCustomerByEmail } from "../services/stripe-sync";
@@ -52,10 +52,57 @@ export const clientsRoute = new Hono()
       .where(client.email ? or(eq(bookings.clientId, id), eq(bookings.email, client.email)) : eq(bookings.clientId, id))
       .orderBy(desc(bookings.date));
 
+    const clientNotesList = await db
+      .select()
+      .from(clientNotes)
+      .where(eq(clientNotes.clientId, id))
+      .orderBy(desc(clientNotes.createdAt));
+
     return c.json(
-      { client, invoices: clientInvoices, quotes: clientQuotes, payments: clientPayments, bookings: clientBookings },
+      {
+        client,
+        invoices: clientInvoices,
+        quotes: clientQuotes,
+        payments: clientPayments,
+        bookings: clientBookings,
+        notes: clientNotesList,
+      },
       200,
     );
+  })
+  .post("/:id/notes", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const [client] = await db.select().from(clients).where(eq(clients.id, id));
+    if (!client) return c.json({ message: "Not found" }, 404);
+
+    const body = await c.req.json();
+    const content = typeof body.content === "string" ? body.content.trim() : "";
+    if (!content) return c.json({ message: "Note content is required" }, 400);
+
+    const [note] = await db.insert(clientNotes).values({ clientId: id, content }).returning();
+    return c.json({ note }, 201);
+  })
+  .put("/:id/notes/:noteId/resolve", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const noteId = Number(c.req.param("noteId"));
+    const [existing] = await db.select().from(clientNotes).where(eq(clientNotes.id, noteId));
+    if (!existing || existing.clientId !== id) return c.json({ message: "Not found" }, 404);
+
+    const [note] = await db
+      .update(clientNotes)
+      .set({ resolved: true, resolvedAt: new Date() })
+      .where(eq(clientNotes.id, noteId))
+      .returning();
+    return c.json({ note }, 200);
+  })
+  .delete("/:id/notes/:noteId", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const noteId = Number(c.req.param("noteId"));
+    const [existing] = await db.select().from(clientNotes).where(eq(clientNotes.id, noteId));
+    if (!existing || existing.clientId !== id) return c.json({ message: "Not found" }, 404);
+
+    await db.delete(clientNotes).where(eq(clientNotes.id, noteId));
+    return c.json({ success: true }, 200);
   })
   .post("/", requireAuth, async (c) => {
     const body = await c.req.json();

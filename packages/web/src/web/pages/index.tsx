@@ -103,6 +103,18 @@ function DashboardContent() {
     },
   });
 
+  const resolveNoteFromDashboard = useMutation({
+    mutationFn: async (p: { clientId: number; noteId: number }) =>
+      (
+        await api.clients[":id"].notes[":noteId"].resolve.$put({
+          param: { id: String(p.clientId), noteId: String(p.noteId) },
+        } as any)
+      ).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dashboard-alerts"] });
+    },
+  });
+
   return (
     <div className="space-y-8">
       {toast && (
@@ -260,10 +272,23 @@ function DashboardContent() {
                     a.severity === "high" ? "bg-destructive" : a.severity === "medium" ? "bg-brand-bronze" : "bg-brand-teal"
                   }`}
                 />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate">{a.title}</p>
                   <p className="text-xs text-muted-foreground truncate">{a.detail}</p>
                 </div>
+                {a.noteId && a.clientId && (
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      resolveNoteFromDashboard.mutate({ clientId: a.clientId, noteId: a.noteId });
+                    }}
+                    disabled={resolveNoteFromDashboard.isPending}
+                    className="text-xs font-medium text-brand-teal hover:underline shrink-0 disabled:opacity-50"
+                  >
+                    Tratada
+                  </button>
+                )}
               </Link>
             ))}
           </div>

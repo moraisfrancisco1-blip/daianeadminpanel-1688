@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { invoices, clients, bookings, invoiceItems, services, payments } from "../database/schema";
+import { invoices, clients, bookings, invoiceItems, services, payments, clientNotes } from "../database/schema";
 import { requireAuth } from "../middleware/auth";
 import { eq } from "drizzle-orm";
 import { stripe } from "../services/stripe";
@@ -404,7 +404,17 @@ export const dashboardRoute = new Hono()
     const clientMap = new Map(allClients.map((cl) => [cl.id, cl.name]));
     const serviceMap = new Map(allServices.map((s) => [s.id, s.name]));
 
-    type Alert = { id: string; severity: "high" | "medium" | "info"; title: string; detail: string; link: string };
+    type Alert = {
+      id: string;
+      severity: "high" | "medium" | "info";
+      title: string;
+      detail: string;
+      link: string;
+      // Present only for client-note alerts — lets the dashboard resolve the
+      // note directly from the alert card, without navigating away.
+      noteId?: number;
+      clientId?: number;
+    };
     const alerts: Alert[] = [];
 
     // 1. Overdue invoices (high)
@@ -468,6 +478,21 @@ export const dashboardRoute = new Hono()
           link: "/clients",
         });
       }
+    }
+
+    // 5. Unresolved client notes (medium) — stays until marked resolved on the
+    // client's page or directly from this alert.
+    const openNotes = await db.select().from(clientNotes).where(eq(clientNotes.resolved, false));
+    for (const n of openNotes) {
+      alerts.push({
+        id: `note-${n.id}`,
+        severity: "medium",
+        title: `Nota pendente · ${clientMap.get(n.clientId) ?? "Cliente"}`,
+        detail: n.content,
+        link: `/clients/${n.clientId}`,
+        noteId: n.id,
+        clientId: n.clientId,
+      });
     }
 
     const order: Record<Alert["severity"], number> = { high: 0, medium: 1, info: 2 };
