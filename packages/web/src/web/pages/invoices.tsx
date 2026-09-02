@@ -8,7 +8,7 @@ import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
 import { SearchInput, SortableTh, EmptyRow, StatusFilter } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, cmpNumberLike, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { netToGross } from "../../api/lib/totals";
-import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil, Link2, Copy, ExternalLink, History } from "lucide-react";
+import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil, Link2, Copy, ExternalLink, History, Ban } from "lucide-react";
 import { downloadFile } from "../lib/download";
 
 export default function InvoicesPage() {
@@ -224,14 +224,40 @@ function InvoicesContent() {
   const deleteInvoice = useMutation({
     mutationFn: async (id: number) => {
       const res = await api.invoices[":id"].$delete({ param: { id: String(id) } });
-      return await res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to delete invoice.");
+      return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["invoices"] });
       showToast("success", "Invoice deleted.");
     },
-    onError: () => showToast("error", "Failed to delete invoice."),
+    onError: (err: any) => showToast("error", err?.message ?? "Failed to delete invoice."),
   });
+
+  const cancelInvoice = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/invoices/${id}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "cancelled" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to cancel invoice.");
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      showToast("success", "Invoice cancelled.");
+    },
+    onError: (err: any) => showToast("error", err?.message ?? "Failed to cancel invoice."),
+  });
+
+  function handleCancel(id: number, invoiceNumber: string) {
+    if (window.confirm(`Cancel invoice ${invoiceNumber}? It keeps its number for the record but no longer counts as revenue.`)) {
+      cancelInvoice.mutate(id);
+    }
+  }
 
   function handleDelete(id: number, invoiceNumber: string) {
     if (window.confirm(`Delete invoice ${invoiceNumber}? This cannot be undone.`)) {
@@ -453,18 +479,30 @@ function InvoicesContent() {
                           <CheckCircle2 className="size-4" />
                         </button>
                       )}
-                      <button
-                        onClick={() => handleDelete(inv.id, inv.invoiceNumber)}
-                        disabled={deleteInvoice.isPending && deleteInvoice.variables === inv.id}
-                        className="text-muted-foreground hover:text-destructive disabled:opacity-50"
-                        title="Delete invoice"
-                      >
-                        {deleteInvoice.isPending && deleteInvoice.variables === inv.id ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="size-4" />
-                        )}
-                      </button>
+                      {inv.status !== "paid" && inv.status !== "cancelled" && (
+                        <button
+                          onClick={() => handleCancel(inv.id, inv.invoiceNumber)}
+                          disabled={cancelInvoice.isPending && cancelInvoice.variables === inv.id}
+                          className="text-muted-foreground hover:text-purple-600 disabled:opacity-50"
+                          title="Cancel invoice (keeps the number, stops counting as revenue)"
+                        >
+                          <Ban className="size-4" />
+                        </button>
+                      )}
+                      {inv.status === "draft" && (
+                        <button
+                          onClick={() => handleDelete(inv.id, inv.invoiceNumber)}
+                          disabled={deleteInvoice.isPending && deleteInvoice.variables === inv.id}
+                          className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                          title="Delete draft invoice"
+                        >
+                          {deleteInvoice.isPending && deleteInvoice.variables === inv.id ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="size-4" />
+                          )}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

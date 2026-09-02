@@ -470,15 +470,22 @@ export const invoicesRoute = new Hono()
   })
   .delete("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
-    
-    // Get existing invoice to check for stripeInvoiceId
+
     const [existingInvoice] = await db.select().from(invoices).where(eq(invoices.id, id));
-    
-    // Delete invoice from Stripe if it has stripeInvoiceId and is still a draft
-    if (existingInvoice?.stripeInvoiceId && existingInvoice.status === "draft") {
+    if (!existingInvoice) return c.json({ message: "Not found" }, 404);
+
+    // Only a draft (never sent, never paid, no official record anywhere else)
+    // can be permanently deleted. Anything sent or paid must be cancelled
+    // instead — it keeps the invoice number and audit trail intact for
+    // accounting purposes rather than leaving an unexplained gap.
+    if (existingInvoice.status !== "draft") {
+      return c.json({ message: "Only draft invoices can be deleted. Cancel this invoice instead to keep its number in the record." }, 400);
+    }
+
+    if (existingInvoice.stripeInvoiceId) {
       await deleteStripeInvoice(existingInvoice.stripeInvoiceId);
     }
-    
+
     await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, id));
     await db.delete(payments).where(eq(payments.invoiceId, id));
     await db.delete(invoices).where(eq(invoices.id, id));

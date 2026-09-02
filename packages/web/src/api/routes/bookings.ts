@@ -9,6 +9,7 @@ import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildRemainderP
 import { nextNumber } from "../lib/counters";
 import { computeVat } from "../lib/totals";
 import { COMPANY } from "../lib/company";
+import { changeInvoiceStatus } from "../services/invoice-activity";
 import { createCalendarEvent, getGoogleBusyIntervals, deleteCalendarEvent, updateCalendarEvent } from "../services/google-calendar";
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 import { claimWebhookEvent, markWebhookEventProcessed, markWebhookEventFailed } from "../services/webhook-idempotency";
@@ -91,6 +92,21 @@ function minutesToTime(mins: number): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// A no-show/cancellation means the session won't happen, so an invoice still
+// waiting on the client (draft/sent/overdue) no longer makes sense — cancel it
+// automatically. Never touches an invoice that's already paid or cancelled;
+// deciding whether to refund a collected payment stays a manual call.
+async function cancelUnpaidInvoiceForSkippedSession(bookingInvoiceId: number | null, reason: "no_show" | "cancelled") {
+  if (!bookingInvoiceId) return;
+  const [linkedInvoice] = await db.select().from(invoices).where(eq(invoices.id, bookingInvoiceId));
+  if (!linkedInvoice || linkedInvoice.status === "paid" || linkedInvoice.status === "cancelled") return;
+  await changeInvoiceStatus(linkedInvoice.id, "cancelled", {
+    channel: "admin",
+    type: "status_changed",
+    metadata: { reason: reason === "no_show" ? "booking_no_show" : "booking_cancelled" },
+  });
 }
 
 export const bookingsRoute = new Hono()
@@ -521,7 +537,11 @@ export const bookingsRoute = new Hono()
     const [existingBooking] = await db.select().from(bookings).where(eq(bookings.id, id));
     
     const [booking] = await db.update(bookings).set({ status }).where(eq(bookings.id, id)).returning();
-    
+
+    if ((status === "no_show" || status === "cancelled") && existingBooking) {
+      await cancelUnpaidInvoiceForSkippedSession(existingBooking.invoiceId, status);
+    }
+
     // Sync with Google Calendar
     if (existingBooking && booking) {
       const [service] = await db.select().from(services).where(eq(services.id, booking.serviceId));
@@ -573,6 +593,10 @@ export const bookingsRoute = new Hono()
       })
       .where(eq(bookings.id, id))
       .returning();
+
+    if ((status === "no_show" || status === "cancelled") && status !== existing.status) {
+      await cancelUnpaidInvoiceForSkippedSession(existing.invoiceId, status);
+    }
 
     // Sync Google Calendar
     if (status === "cancelled") {
