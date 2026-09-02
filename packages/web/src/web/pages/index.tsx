@@ -6,6 +6,7 @@ import {
   Users,
   Receipt,
   TrendingUp,
+  TrendingDown,
   AlertTriangle,
   CalendarClock,
   Plus,
@@ -14,10 +15,23 @@ import {
   Sparkles,
   CreditCard,
   Euro,
+  CheckCircle2,
 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, AreaChart, Area } from "recharts";
 import { useState } from "react";
-import { StatusPill } from "../components/status-pill";
+import { cn } from "../lib/utils";
+
+function serviceAccent(name?: string | null): { bg: string } {
+  const n = (name ?? "").toLowerCase();
+  if (n.includes("massage")) return { bg: "bg-brand-bronze" };
+  if (n.includes("recovery") || n.includes("postpartum")) return { bg: "bg-brand-copper" };
+  if (n.includes("pregnancy") || n.includes("birth")) return { bg: "bg-brand-teal" };
+  return { bg: "bg-muted-foreground" };
+}
+
+function weekdayDateLabel(): string {
+  return new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+}
 
 export default function DashboardPage() {
   return (
@@ -50,6 +64,10 @@ function DashboardContent() {
   const serviceBreakdown = useQuery({
     queryKey: ["dashboard-service-breakdown"],
     queryFn: async (): Promise<any> => (await api.dashboard["service-breakdown"].$get()).json(),
+  });
+  const sessionsThisMonthByService = useQuery({
+    queryKey: ["dashboard-sessions-this-month-by-service"],
+    queryFn: async (): Promise<any> => (await api.dashboard["sessions-this-month-by-service"].$get()).json(),
   });
   const topClients = useQuery({
     queryKey: ["dashboard-top-clients"],
@@ -126,7 +144,7 @@ function DashboardContent() {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="font-display text-3xl font-semibold text-brand-teal">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">Overview of your business</p>
+          <p className="text-muted-foreground mt-1">Overview of your business · {weekdayDateLabel()}</p>
         </div>
         <div className="flex gap-2">
           <Link to="/invoices">
@@ -147,111 +165,126 @@ function DashboardContent() {
         </div>
       </div>
 
+      {/* Hero: revenue this month + at-a-glance tiles */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <RevenueHero
+          loading={stats.isLoading || revenueChart.isLoading}
+          revenueThisMonth={stats.data?.revenueThisMonth ?? 0}
+          prevMonthRevenue={stats.data?.prevMonthRevenue ?? 0}
+          chartData={revenueChart.data?.chart ?? []}
+        />
+        <div className="grid grid-cols-2 gap-4">
+          <MiniTile icon={Users} label="Total clients" value={stats.data?.totalClients ?? 0} loading={stats.isLoading} />
+          <MiniTile
+            icon={Euro}
+            label="Total revenue (net)"
+            value={`€${(stats.data?.totalRevenue ?? 0).toFixed(2)}`}
+            loading={stats.isLoading}
+          />
+          <MiniTile
+            icon={AlertTriangle}
+            label="Overdue invoices"
+            value={stats.data?.overdueCount ?? 0}
+            tone="danger"
+            loading={stats.isLoading}
+          />
+          <MiniTile
+            icon={Receipt}
+            label="Outstanding total"
+            value={`€${(stats.data?.outstandingTotal ?? 0).toFixed(2)}`}
+            loading={stats.isLoading}
+          />
+        </div>
+      </div>
+
       {/* O meu dia — today's focus */}
       <div className="bg-card border border-border rounded-xl p-6">
-        <h3 className="font-medium mb-4 flex items-center gap-2">
-          <CalendarClock className="size-4 text-brand-copper" />
-          O meu dia
-          {todayData.data?.date && (
-            <span className="text-xs font-normal text-muted-foreground">
-              · {new Date(todayData.data.date + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
-            </span>
-          )}
-        </h3>
+        <h3 className="font-display text-lg font-medium mb-1">O meu dia</h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          {(todayData.data?.sessions ?? []).length} sessõe{(todayData.data?.sessions ?? []).length === 1 ? "" : "s"} agendada
+          {(todayData.data?.sessions ?? []).length === 1 ? "" : "s"} para hoje
+        </p>
         {todayData.isLoading ? (
           <div className="h-24 bg-muted rounded animate-pulse" />
         ) : (
-          <div className="space-y-2">
-            {(todayData.data?.sessions ?? []).map((s: any) => (
-              <div key={s.id} className="flex items-center justify-between text-sm gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium">
-                    {s.startTime} · {s.name}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {s.serviceName} ({s.durationMinutes} min)
-                  </p>
+          <div className="divide-y divide-border">
+            {(todayData.data?.sessions ?? []).map((s: any) => {
+              const accent = serviceAccent(s.serviceName);
+              const initials = (s.name ?? "")
+                .split(/\s+/)
+                .slice(0, 2)
+                .map((p: string) => p[0])
+                .join("")
+                .toUpperCase();
+              return (
+                <div key={s.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                  <span className="w-12 shrink-0 text-sm text-muted-foreground">{s.startTime}</span>
+                  <span
+                    className={cn("size-9 shrink-0 rounded-full flex items-center justify-center text-white text-xs font-display font-semibold", accent.bg)}
+                  >
+                    {initials || "?"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate">{s.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {s.serviceName} — {s.durationMinutes} min
+                    </p>
+                  </div>
+                  {s.status === "confirmed" ? (
+                    <span className="shrink-0 flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-[#4C7A56]/12 text-[#3F6B52]">
+                      <CheckCircle2 className="size-3.5" /> Confirmed
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground capitalize">
+                      {s.status?.replace(/_/g, " ")}
+                    </span>
+                  )}
                 </div>
-                <StatusPill status={s.status} />
-              </div>
-            ))}
+              );
+            })}
             {(todayData.data?.sessions ?? []).length === 0 && (
-              <p className="text-sm text-muted-foreground">Sem sessões hoje.</p>
+              <p className="text-sm text-muted-foreground py-2">No more clients today.</p>
             )}
-            {todayData.data?.nextClient && (
-              <div className="mt-3 pt-3 border-t border-border text-sm">
-                <p className="text-xs text-muted-foreground">Próximo cliente</p>
-                <p className="font-medium">
-                  {todayData.data.nextClient.startTime} · {todayData.data.nextClient.name} — {todayData.data.nextClient.serviceName}
-                </p>
-              </div>
-            )}
-            {todayData.data?.nextClient == null && (todayData.data?.confirmedCount ?? 0) > 0 && (
-              <div className="mt-3 pt-3 border-t border-border text-sm">
-                <p className="text-xs text-muted-foreground">Próximo cliente</p>
-                <p className="font-medium text-muted-foreground">No more clients today.</p>
-              </div>
-            )}
+          </div>
+        )}
+        {!todayData.isLoading && todayData.data?.nextClient && (
+          <div className="mt-3 pt-3 border-t border-border text-sm">
+            <p className="text-xs text-muted-foreground">Próximo cliente</p>
+            <p className="font-medium">
+              {todayData.data.nextClient.startTime} · {todayData.data.nextClient.name} — {todayData.data.nextClient.serviceName}
+            </p>
+          </div>
+        )}
+        {!todayData.isLoading && todayData.data?.nextClient == null && (todayData.data?.confirmedCount ?? 0) > 0 && (
+          <div className="mt-3 pt-3 border-t border-border text-sm">
+            <p className="text-xs text-muted-foreground">Próximo cliente</p>
+            <p className="font-medium text-muted-foreground">No more clients today.</p>
           </div>
         )}
       </div>
 
-      {/* Stat cards */}
-      {stats.isLoading ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-28 rounded-xl bg-muted animate-pulse" />
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <StatCard icon={Users} label="Total clients" value={stats.data?.totalClients ?? 0} />
-          <StatCard
-            icon={Euro}
-            label="Total revenue (net)"
-            value={`€${(stats.data?.totalRevenue ?? 0).toFixed(2)}`}
-          />
-          <StatCard
-            icon={TrendingUp}
-            label="Revenue this month"
-            value={`€${(stats.data?.revenueThisMonth ?? 0).toFixed(2)}`}
-          />
-          <StatCard icon={AlertTriangle} label="Overdue invoices" value={stats.data?.overdueCount ?? 0} tone="danger" />
-          <StatCard icon={Receipt} label="Outstanding total" value={`€${(stats.data?.outstandingTotal ?? 0).toFixed(2)}`} />
-        </div>
-      )}
-
-      {/* Financial summary — faturado vs recebido vs pendente */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard icon={Euro} label="Recebido hoje" value={`€${(stats.data?.revenueToday ?? 0).toFixed(2)}`} />
-        <StatCard icon={Euro} label="Recebido esta semana" value={`€${(stats.data?.revenueThisWeek ?? 0).toFixed(2)}`} />
-        <StatCard icon={Euro} label="Recebido este ano" value={`€${(stats.data?.revenueThisYear ?? 0).toFixed(2)}`} />
-        <StatCard
-          icon={TrendingUp}
-          label="Sessões (mês / total)"
-          value={`${stats.data?.sessionsThisMonth ?? 0} / ${stats.data?.totalSessions ?? 0}`}
+      {/* Financial summary — faturado vs recebido vs pendente + sessões por serviço */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <BillingRingCard
+          loading={stats.isLoading}
+          billed={stats.data?.billedThisMonth ?? 0}
+          paid={stats.data?.paidThisMonth ?? 0}
+          pending={stats.data?.pendingTotal ?? 0}
+          prevMonthRevenue={stats.data?.prevMonthRevenue ?? 0}
+        />
+        <SessionsBarCard
+          loading={stats.isLoading || sessionsThisMonthByService.isLoading}
+          sessionsThisMonth={stats.data?.sessionsThisMonth ?? 0}
+          totalSessions={stats.data?.totalSessions ?? 0}
+          breakdown={sessionsThisMonthByService.data?.breakdown ?? []}
         />
       </div>
 
-      <div className="bg-card border border-border rounded-xl p-6">
-        <h3 className="font-medium mb-4">Este mês — faturado vs recebido vs pendente</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <p className="text-xs text-muted-foreground">Faturado (emitido)</p>
-            <p className="text-2xl font-display font-semibold">€{(stats.data?.billedThisMonth ?? 0).toFixed(2)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Recebido</p>
-            <p className="text-2xl font-display font-semibold text-[#4C7A56]">€{(stats.data?.paidThisMonth ?? 0).toFixed(2)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Pendente (em aberto)</p>
-            <p className="text-2xl font-display font-semibold text-brand-copper">€{(stats.data?.pendingTotal ?? 0).toFixed(2)}</p>
-          </div>
-        </div>
-        <p className="text-xs text-muted-foreground mt-3">
-          Mês passado: €{(stats.data?.prevMonthRevenue ?? 0).toFixed(2)} recebidos.
-        </p>
+      {/* Received so far this week / year */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <StatCard icon={Euro} label="Recebido hoje" value={`€${(stats.data?.revenueToday ?? 0).toFixed(2)}`} />
+        <StatCard icon={Euro} label="Recebido esta semana" value={`€${(stats.data?.revenueThisWeek ?? 0).toFixed(2)}`} />
+        <StatCard icon={Euro} label="Recebido este ano" value={`€${(stats.data?.revenueThisYear ?? 0).toFixed(2)}`} />
       </div>
 
       {/* Alertas inteligentes */}
@@ -546,6 +579,224 @@ function StatCard({
         <span className="text-xs text-muted-foreground font-medium">{label}</span>
       </div>
       <p className={`text-2xl font-display font-semibold ${tone === "danger" ? "text-destructive" : ""}`}>{value}</p>
+    </div>
+  );
+}
+
+function MiniTile({
+  icon: Icon,
+  label,
+  value,
+  tone,
+  loading,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string | number;
+  tone?: "danger";
+  loading?: boolean;
+}) {
+  if (loading) return <div className="h-24 rounded-xl bg-muted animate-pulse" />;
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 flex flex-col">
+      <span
+        className={cn(
+          "size-8 rounded-full flex items-center justify-center mb-2",
+          tone === "danger" ? "bg-destructive/10 text-destructive" : "bg-brand-copper/10 text-brand-copper",
+        )}
+      >
+        <Icon className="size-4" />
+      </span>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={cn("text-lg font-display font-semibold mt-0.5", tone === "danger" && "text-destructive")}>{value}</p>
+    </div>
+  );
+}
+
+function RevenueHero({
+  loading,
+  revenueThisMonth,
+  prevMonthRevenue,
+  chartData,
+}: {
+  loading?: boolean;
+  revenueThisMonth: number;
+  prevMonthRevenue: number;
+  chartData: { label: string; revenue: number }[];
+}) {
+  const trendPct = prevMonthRevenue > 0 ? ((revenueThisMonth - prevMonthRevenue) / prevMonthRevenue) * 100 : null;
+
+  return (
+    <div className="lg:col-span-2 rounded-xl p-6 bg-gradient-to-br from-brand-teal to-brand-teal-dark text-brand-cream flex flex-col">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-cream/55">Receita deste mês</p>
+      {loading ? (
+        <div className="h-32 mt-2 bg-white/5 rounded animate-pulse" />
+      ) : (
+        <>
+          <div className="flex items-center gap-3 mt-2 flex-wrap">
+            <span className="font-display text-4xl md:text-5xl font-semibold text-white">€{revenueThisMonth.toFixed(0)}</span>
+            {trendPct !== null && (
+              <span
+                className={cn(
+                  "flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full",
+                  trendPct >= 0 ? "bg-emerald-400/20 text-emerald-300" : "bg-red-400/20 text-red-300",
+                )}
+              >
+                {trendPct >= 0 ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
+                {trendPct >= 0 ? "+" : ""}
+                {trendPct.toFixed(0)}%
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-brand-cream/50 mt-1">vs. €{prevMonthRevenue.toFixed(0)} no mês passado</p>
+          <div className="mt-4 -mx-2 flex-1 min-h-[100px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+                <defs>
+                  <linearGradient id="heroRevenueGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#D9915F" stopOpacity={0.55} />
+                    <stop offset="100%" stopColor="#D9915F" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <Area type="monotone" dataKey="revenue" stroke="#D9915F" strokeWidth={2} fill="url(#heroRevenueGradient)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BillingRingCard({
+  loading,
+  billed,
+  paid,
+  pending,
+  prevMonthRevenue,
+}: {
+  loading?: boolean;
+  billed: number;
+  paid: number;
+  pending: number;
+  prevMonthRevenue: number;
+}) {
+  const total = paid + pending + billed || 1;
+  const paidPct = (paid / total) * 100;
+  const pendingPct = (pending / total) * 100;
+  const billedPct = Math.max(0, 100 - paidPct - pendingPct);
+  const ringStyle = {
+    background: `conic-gradient(#4C7A56 0% ${paidPct}%, #AE633F ${paidPct}% ${paidPct + pendingPct}%, #EBDFCF ${paidPct + pendingPct}% 100%)`,
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-6">
+      <h3 className="font-display text-lg font-medium">Este mês — Faturado vs Recebido vs Pendente</h3>
+      <p className="text-xs text-muted-foreground mb-4">Estado de cobrança em tempo real</p>
+      {loading ? (
+        <div className="h-40 bg-muted rounded animate-pulse" />
+      ) : (
+        <div className="flex items-center gap-6 flex-wrap">
+          <div className="relative size-36 shrink-0 mx-auto">
+            <div className="absolute inset-0 rounded-full" style={ringStyle} />
+            <div className="absolute inset-[12px] rounded-full bg-card flex flex-col items-center justify-center text-center px-2">
+              <span className="font-display text-lg font-semibold text-brand-copper leading-tight">€{pending.toFixed(0)}</span>
+              <span className="text-[10px] text-muted-foreground">pendente</span>
+            </div>
+          </div>
+          <div className="flex-1 min-w-[180px] space-y-3">
+            <RingLegendRow dotClass="bg-[#4C7A56]" barClass="bg-[#4C7A56]" label="Recebido" value={paid} pct={paidPct} />
+            <RingLegendRow dotClass="bg-brand-copper" barClass="bg-brand-copper" label="Pendente" value={pending} pct={pendingPct} />
+            <RingLegendRow dotClass="bg-brand-beige border border-border" barClass="bg-brand-beige" label="Faturado (emitido)" value={billed} pct={billedPct} />
+          </div>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground mt-4">Mês passado: €{prevMonthRevenue.toFixed(2)} recebidos.</p>
+    </div>
+  );
+}
+
+function RingLegendRow({
+  dotClass,
+  barClass,
+  label,
+  value,
+  pct,
+}: {
+  dotClass: string;
+  barClass: string;
+  label: string;
+  value: number;
+  pct: number;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <span className={cn("size-2 rounded-full shrink-0", dotClass)} />
+        {label}
+      </div>
+      <p className="font-display text-base font-semibold ml-4">€{value.toFixed(2)}</p>
+      <div className="ml-4 mt-1 h-1.5 rounded-full bg-muted overflow-hidden max-w-40">
+        <div className={cn("h-full rounded-full", barClass)} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function SessionsBarCard({
+  loading,
+  sessionsThisMonth,
+  totalSessions,
+  breakdown,
+}: {
+  loading?: boolean;
+  sessionsThisMonth: number;
+  totalSessions: number;
+  breakdown: { name: string; count: number }[];
+}) {
+  const sum = breakdown.reduce((s, b) => s + b.count, 0) || 1;
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-6">
+      <h3 className="font-display text-lg font-medium">Sessões — mês / total</h3>
+      <p className="text-xs text-muted-foreground mb-4">
+        {sessionsThisMonth} de {totalSessions} sessões utilizadas este mês
+      </p>
+      {loading ? (
+        <div className="h-24 bg-muted rounded animate-pulse" />
+      ) : (
+        <>
+          <div className="h-3 rounded-full overflow-hidden flex bg-muted">
+            {breakdown.map((b) => {
+              const accent = serviceAccent(b.name);
+              return (
+                <div
+                  key={b.name}
+                  className={accent.bg}
+                  style={{ width: `${(b.count / sum) * 100}%` }}
+                  title={`${b.name}: ${b.count}`}
+                />
+              );
+            })}
+            {breakdown.length === 0 && <div className="w-full bg-muted" />}
+          </div>
+          <div className="mt-4 space-y-2">
+            {breakdown.map((b) => {
+              const accent = serviceAccent(b.name);
+              return (
+                <div key={b.name} className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 text-muted-foreground">
+                    <span className={cn("size-2.5 rounded-sm shrink-0", accent.bg)} />
+                    {b.name}
+                  </span>
+                  <span className="font-medium">{b.count}</span>
+                </div>
+              );
+            })}
+            {breakdown.length === 0 && <p className="text-sm text-muted-foreground">No sessions this month yet.</p>}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -182,6 +182,27 @@ export const dashboardRoute = new Hono()
     const breakdown = Array.from(byService.values()).sort((a, b) => b.revenue - a.revenue);
     return c.json({ breakdown }, 200);
   })
+  .get("/sessions-this-month-by-service", requireAuth, async (c) => {
+    const ym = amsTodayStr().slice(0, 7);
+    const allBookings = await db.select().from(bookings);
+    const allServices = await db.select().from(services);
+    const serviceNameMap = new Map(allServices.map((s) => [s.id, s.name]));
+
+    const activeThisMonth = allBookings.filter(
+      (b) => (b.status === "confirmed" || b.status === "completed") && b.date.startsWith(ym),
+    );
+
+    const byService = new Map<string, number>();
+    for (const b of activeThisMonth) {
+      const name = (b.serviceId != null ? serviceNameMap.get(b.serviceId) : null) ?? "Other";
+      byService.set(name, (byService.get(name) ?? 0) + 1);
+    }
+
+    const breakdown = Array.from(byService.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+    return c.json({ total: activeThisMonth.length, breakdown }, 200);
+  })
   .get("/top-clients", requireAuth, async (c) => {
     const limit = Number(c.req.query("limit") ?? 5);
     const paidInvoices = await db.select().from(invoices).where(eq(invoices.status, "paid"));
