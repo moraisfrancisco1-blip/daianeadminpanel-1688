@@ -321,4 +321,23 @@ export const emailLog = sqliteTable(
   ],
 );
 
+// Manual outbound messages sent from the "Messages" quick-template page —
+// separate from emailLog (automated transactional emails). For whatsapp/email,
+// "sent" only means the admin opened the app with the message pre-filled
+// (there's no delivery confirmation for those channels); SMS status reflects
+// the real Twilio result.
+export const messageLog = sqliteTable("message_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  clientId: integer("client_id"),
+  channel: text("channel").notNull(), // whatsapp | sms | email
+  recipient: text("recipient").notNull(),
+  templateId: text("template_id"),
+  body: text("body").notNull(),
+  status: text("status").notNull().default("sent"), // sent | failed | opened
+  error: text("error"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export * from "./auth-schema";

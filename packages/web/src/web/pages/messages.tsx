@@ -1,11 +1,26 @@
-import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
-import { Copy, MessageCircle, Mail, Check, Smartphone } from "lucide-react";
+import { Copy, MessageCircle, Mail, Check, Smartphone, History } from "lucide-react";
 
 type Client = { id: number; name: string; email: string | null; phone: string | null };
 type Service = { id: number; name: string };
+type ClientBooking = { id: number; serviceId: number | null; date: string; startTime: string; status: string };
+type MessageLogRow = {
+  id: number;
+  clientId: number | null;
+  clientName: string | null;
+  channel: string;
+  recipient: string;
+  templateId: string | null;
+  body: string;
+  status: string;
+  error: string | null;
+  createdAt: string;
+};
+
+const CHANNEL_LABEL: Record<string, string> = { whatsapp: "WhatsApp", sms: "SMS", email: "Email" };
 
 const TEMPLATES = [
   {
@@ -78,6 +93,30 @@ function MessagesContent() {
   const selectedClient = clientsList.find((c) => c.id === Number(clientId));
   const selectedService = servicesList.find((s) => s.id === Number(serviceId));
 
+  // Pull the client's next upcoming session so the message doesn't need the
+  // date/time typed by hand every time — still editable afterwards.
+  const clientDetailQ = useQuery({
+    queryKey: ["messages-client-detail", clientId],
+    queryFn: async (): Promise<{ bookings: ClientBooking[] }> => {
+      const res = await api.clients[":id"].$get({ param: { id: clientId } });
+      return (await res.json()) as any;
+    },
+    enabled: !!clientId,
+  });
+
+  useEffect(() => {
+    if (!clientId || !clientDetailQ.data) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const upcoming = clientDetailQ.data.bookings
+      .filter((b) => (b.status === "confirmed" || b.status === "pending_deposit") && b.date >= today)
+      .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`))[0];
+    if (upcoming) {
+      setDate(upcoming.date);
+      setTime(upcoming.startTime);
+      if (upcoming.serviceId) setServiceId(String(upcoming.serviceId));
+    }
+  }, [clientId, clientDetailQ.data]);
+
   const message = useMemo(() => {
     const tpl = TEMPLATES.find((t) => t.id === templateId) ?? TEMPLATES[0];
     return tpl.body
@@ -99,17 +138,47 @@ function MessagesContent() {
     ? `mailto:${selectedClient.email}?subject=${encodeURIComponent("Studio Daï Oakes")}&body=${encodeURIComponent(message)}`
     : null;
 
+  const qc = useQueryClient();
+
+  const messagesLogQ = useQuery({
+    queryKey: ["messages-log"],
+    queryFn: async () => (await api.messages.log.$get()).json() as Promise<{ messages: MessageLogRow[] }>,
+  });
+
   const smsMutation = useMutation({
     mutationFn: async () => {
       if (!selectedClient?.phone) throw new Error("O cliente não tem número de telefone.");
-      const res = await api.sms.send.$post({ json: { to: selectedClient.phone, message } });
+      const res = await api.sms.send.$post({
+        json: { to: selectedClient.phone, message, clientId: selectedClient.id, templateId },
+      });
       const data = (await res.json()) as { success?: boolean; message?: string };
       if (!res.ok || !data.success) throw new Error(data.message ?? "Não foi possível enviar o SMS.");
       return data;
     },
-    onSuccess: () => setSmsStatus("SMS enviado com sucesso."),
+    onSuccess: () => {
+      setSmsStatus("SMS enviado com sucesso.");
+      qc.invalidateQueries({ queryKey: ["messages-log"] });
+    },
     onError: (error) => setSmsStatus(error instanceof Error ? error.message : "Não foi possível enviar o SMS."),
   });
+
+  // WhatsApp/email open an external app, so this only records that the admin
+  // opened it with the message pre-filled — not proof of actual delivery.
+  function logOpened(channel: "whatsapp" | "email", recipient: string) {
+    api.messages.log
+      .$post({
+        json: {
+          clientId: selectedClient?.id ?? null,
+          channel,
+          recipient,
+          templateId,
+          body: message,
+          status: "opened",
+        },
+      })
+      .then(() => qc.invalidateQueries({ queryKey: ["messages-log"] }))
+      .catch(() => {});
+  }
 
   return (
     <div className="space-y-6">
@@ -226,6 +295,7 @@ function MessagesContent() {
                 href={waLink}
                 target="_blank"
                 rel="noreferrer"
+                onClick={() => logOpened("whatsapp", phone ?? "")}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium bg-[#25D366] text-white hover:opacity-90"
               >
                 <MessageCircle className="size-4" /> WhatsApp
@@ -234,6 +304,7 @@ function MessagesContent() {
             {mailLink && (
               <a
                 href={mailLink}
+                onClick={() => logOpened("email", selectedClient?.email ?? "")}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
               >
                 <Mail className="size-4" /> Email
@@ -248,6 +319,49 @@ function MessagesContent() {
               Selecione um cliente com telefone ou email para abrir WhatsApp/Email diretamente.
             </p>
           )}
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <h3 className="font-medium p-6 pb-3 flex items-center gap-2">
+          <History className="size-4 text-brand-copper" /> Mensagens recentes
+        </h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
+            <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="px-6 py-3 font-medium">Cliente</th>
+                <th className="px-4 py-3 font-medium">Canal</th>
+                <th className="px-4 py-3 font-medium">Estado</th>
+                <th className="px-4 py-3 font-medium">Quando</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(messagesLogQ.data?.messages ?? []).map((m) => (
+                <tr key={m.id} className="border-t border-border">
+                  <td className="px-6 py-3 font-medium">{m.clientName ?? m.recipient}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{CHANNEL_LABEL[m.channel] ?? m.channel}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        m.status === "failed" ? "bg-red-600/12 text-red-700" : "bg-[#3F6B52]/12 text-[#3F6B52]"
+                      }`}
+                    >
+                      {m.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">{new Date(m.createdAt).toLocaleString("en-GB")}</td>
+                </tr>
+              ))}
+              {(messagesLogQ.data?.messages ?? []).length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
+                    Sem mensagens registadas.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
