@@ -7,6 +7,7 @@ import { clients, invoices, bookings, services, invoiceItems, payments, refunds 
 import { eq } from "drizzle-orm";
 import { nextNumber } from "../lib/counters";
 import { computeVat, DEFAULT_VAT_RATE } from "../lib/totals";
+import { invoiceDescriptionForService } from "../lib/invoice-description";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml } from "../lib/email-templates";
 import { sendTrackedEmail } from "../services/email-log";
 import { changeInvoiceStatus, recordInvoiceActivity } from "../services/invoice-activity";
@@ -491,7 +492,7 @@ stripeWebhookRoute.post("/", async (c) => {
 
         await db.insert(invoiceItems).values({
           invoiceId: invoice!.id,
-          description: booking.payFullNow ? `${service?.name ?? "Session"} — full payment` : `${service?.name ?? "Session"} — booking deposit`,
+          description: service ? invoiceDescriptionForService(service) : "Session",
           quantity: 1,
           unitPrice: net,
           vatRate,

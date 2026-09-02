@@ -8,6 +8,7 @@ import { sendTrackedEmail } from "../services/email-log";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildRemainderPaymentEmailHtml } from "../lib/email-templates";
 import { nextNumber } from "../lib/counters";
 import { computeVat } from "../lib/totals";
+import { invoiceDescriptionForService } from "../lib/invoice-description";
 import { COMPANY } from "../lib/company";
 import { changeInvoiceStatus } from "../services/invoice-activity";
 import { createCalendarEvent, getGoogleBusyIntervals, deleteCalendarEvent, updateCalendarEvent } from "../services/google-calendar";
@@ -465,7 +466,6 @@ export const bookingsRoute = new Hono()
           status: "draft",
           issueDate,
           dueDate,
-          notes: `Booking payment — ${service.name}`,
           subtotal: net,
           vatTotal: vat,
           total: pendingAmount,
@@ -475,7 +475,7 @@ export const bookingsRoute = new Hono()
       await db.insert(invoiceItems).values({
         invoiceId: invoice!.id,
         serviceId: service.id,
-        description: `${service.name} — booking payment`,
+        description: invoiceDescriptionForService(service),
         quantity: 1,
         unitPrice: net,
         vatRate,
@@ -841,9 +841,7 @@ export const bookingsRoute = new Hono()
           await db.insert(invoiceItems).values({
             invoiceId: invoice!.id,
             serviceId: service?.id ?? null,
-            description: booking.payFullNow
-              ? `${service?.name ?? "Session"} — full payment`
-              : `${service?.name ?? "Session"} — booking deposit`,
+            description: service ? invoiceDescriptionForService(service) : "Session",
             quantity: 1,
             unitPrice: amount,
             vatRate,

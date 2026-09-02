@@ -1,5 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
 import { computeTotals } from "../../api/lib/totals";
+import { invoiceDescriptionForService } from "../../api/lib/invoice-description";
 
 export interface LineItemDraft {
   description: string;
@@ -42,11 +43,7 @@ export function LineItemEditor({
   function applyService(i: number, serviceId: number) {
     const svc = services.find((s) => s.id === serviceId);
     if (!svc) return;
-    // For Deep CORE Somatic Mobility services, use "NN' Deep CORE Somatic Mobility"
-    // instead of the internal catalog name ("Daï Massage — NN min").
-    const isDcs = !!svc.description && /deep core somatic/i.test(svc.description);
-    const durationPrefix = svc.durationMinutes ? `${svc.durationMinutes}' ` : "";
-    const description = isDcs ? `${durationPrefix}${svc.description}` : svc.name;
+    const description = invoiceDescriptionForService(svc);
     update(i, { serviceId, description, unitPrice: svc.price, vatRate: svc.vatRate });
   }
 
