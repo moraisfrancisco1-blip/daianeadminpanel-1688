@@ -78,7 +78,9 @@ function PackagesContent() {
   const save = useMutation({
     mutationFn: async (data: any) =>
       editing
-        ? (await api.packages[":id"].$put({ param: { id: String(editing.id) }, json: data })).json()
+        ? // PUT /packages/:id has no zod validator on the backend, so the Hono RPC
+          // client can't infer a body type for it (only the `:id` param).
+          (await api.packages[":id"].$put({ param: { id: String(editing.id) }, json: data } as any)).json()
         : (await api.packages.$post({ json: data })).json(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });

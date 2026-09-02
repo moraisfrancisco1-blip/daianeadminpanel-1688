@@ -1,6 +1,4 @@
-import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { Button } from "./ui/button";
 import { computeTotals } from "../../api/lib/totals";
 
 export interface LineItemDraft {

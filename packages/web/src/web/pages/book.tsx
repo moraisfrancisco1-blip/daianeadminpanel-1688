@@ -60,7 +60,9 @@ export default function BookPage() {
   const dates = nextWorkDays(9);
 
   // Pre-select a service when arriving via a direct link, e.g. /book?service=8
-  // (used for per-service buttons on the main website).
+  // (used for per-service buttons on the main website). The `serviceId !== null`
+  // guard below makes this a no-op once a service is picked, so it's safe to
+  // also re-run on `serviceId` changes.
   useEffect(() => {
     if (serviceId !== null || !services.data?.services.length) return;
     const params = new URLSearchParams(window.location.search);
@@ -68,7 +70,7 @@ export default function BookPage() {
     if (!requested) return;
     const match = services.data.services.find((s) => s.id === Number(requested));
     if (match) setServiceId(match.id);
-  }, [services.data]);
+  }, [services.data, serviceId]);
 
   useEffect(() => {
     if (serviceId && detailsRef.current) {

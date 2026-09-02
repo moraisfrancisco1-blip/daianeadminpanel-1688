@@ -34,7 +34,7 @@ export async function findStripeCustomerByEmail(email: string | null | undefined
   const norm = normalizeEmail(email);
   if (!norm) return null;
   const ids = await listStripeCustomersByEmail(norm);
-  if (ids.length === 1) return ids[0];
+  if (ids.length === 1) return ids[0] ?? null;
   if (ids.length > 1) {
     console.warn(`[stripe-sync] Multiple Stripe customers for email ${norm} — manual review needed:`, ids);
   }
@@ -66,7 +66,7 @@ export async function createStripeCustomer(client: {
       const existingIds = await listStripeCustomersByEmail(email);
       if (existingIds.length === 1) {
         console.log(`[stripe-sync] Reusing existing Stripe customer ${existingIds[0]} for email ${email}`);
-        return existingIds[0];
+        return existingIds[0] ?? null;
       }
       if (existingIds.length > 1) {
         console.warn(`[stripe-sync] Multiple Stripe customers for email ${email} — NOT creating a new one, manual review needed:`, existingIds);
@@ -214,11 +214,12 @@ export async function syncStripeCustomerToLocal(stripeCustomer: {
   const email = normalizeEmail(stripeCustomer.email);
   if (email) {
     const byEmail = await db.select().from(clients).where(sql`lower(trim(${clients.email})) = ${email}`);
-    if (byEmail.length === 1) {
+    const [matchedByEmail] = byEmail;
+    if (byEmail.length === 1 && matchedByEmail) {
       const [updated] = await db
         .update(clients)
         .set(clientData)
-        .where(eq(clients.id, byEmail[0].id))
+        .where(eq(clients.id, matchedByEmail.id))
         .returning();
       return updated?.id ?? null;
     }

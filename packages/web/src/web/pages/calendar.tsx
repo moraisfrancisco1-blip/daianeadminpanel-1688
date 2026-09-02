@@ -158,7 +158,10 @@ function CalendarContent() {
 
   const updateBooking = useMutation({
     mutationFn: async (p: { id: number; data: any }) =>
-      (await api.bookings[":id"].$put({ param: { id: String(p.id) }, json: p.data })).json(),
+      // PUT /bookings/:id has no zod validator on the backend, so the Hono RPC
+      // client can't infer a body type for it (only the `:id` param) — cast is
+      // required here, not a sign the request itself is malformed.
+      (await api.bookings[":id"].$put({ param: { id: String(p.id) }, json: p.data } as any)).json(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["bookings"] });
       qc.invalidateQueries({ queryKey: ["calendar-bookings"] });

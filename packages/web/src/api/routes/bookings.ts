@@ -4,7 +4,6 @@ import { bookings, services, clients, invoices, invoiceItems, blockedSlots } fro
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { stripe } from "../services/stripe";
-import { sendEmail } from "../services/email";
 import { sendTrackedEmail } from "../services/email-log";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildRemainderPaymentEmailHtml } from "../lib/email-templates";
 import { nextNumber } from "../lib/counters";
@@ -732,6 +731,7 @@ export const bookingsRoute = new Hono()
     try {
       event = await stripe.webhooks.constructEventAsync(body, sig!, process.env.STRIPE_WEBHOOK_SECRET!);
     } catch (err) {
+      console.error("[bookings/webhook] Signature verification failed:", err);
       return c.json({ message: "Invalid signature" }, 400);
     }
 

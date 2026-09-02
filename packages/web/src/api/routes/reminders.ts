@@ -3,7 +3,6 @@ import { db } from "../database";
 import { invoices, clients, bookings } from "../database/schema";
 import { eq, and, lt, ne, isNull, inArray, gt } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
-import { sendEmail } from "../services/email";
 import { sendTrackedEmail } from "../services/email-log";
 import { buildReminderEmailHtml, buildPostSessionEmailHtml, buildSessionReminderEmailHtml, buildRebookReminderEmailHtml } from "../lib/email-templates";
 import { COMPANY } from "../lib/company";

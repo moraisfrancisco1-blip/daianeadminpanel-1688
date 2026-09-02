@@ -28,17 +28,38 @@ export async function sendEmail({ to, subject, text, html, replyTo, attachments 
     console.warn("[email] RESEND_API_KEY not set — skipping send:", subject);
     return { skipped: true };
   }
-  const { data, error } = await resend.emails.send({
-    from: "Studio Daï Oakes <admin@studiodaioakes.com>",
-    to: Array.isArray(to) ? to : [to],
-    subject,
-    // Always include a plain-text version alongside HTML — improves spam filter
-    // scoring (multipart emails are trusted more than HTML-only).
-    text: text ?? (html ? htmlToPlainText(html) : undefined),
-    html,
-    replyTo,
-    attachments: attachments?.map((a) => ({ filename: a.filename, content: a.content })),
-  });
+
+  const recipients = Array.isArray(to) ? to : [to];
+  const attachmentPayload = attachments?.map((a) => ({ filename: a.filename, content: a.content }));
+
+  // Resend requires react, html, or text to be present (its type only accepts an
+  // object literal where at least one of those is a definite string) — branch
+  // explicitly instead of passing possibly-undefined html/text through, which
+  // both satisfies the type and matches the API's actual runtime requirement.
+  const { data, error } = html
+    ? await resend.emails.send({
+        from: "Studio Daï Oakes <admin@studiodaioakes.com>",
+        to: recipients,
+        subject,
+        html,
+        // Always include a plain-text version alongside HTML — improves spam filter
+        // scoring (multipart emails are trusted more than HTML-only).
+        text: text ?? htmlToPlainText(html),
+        replyTo,
+        attachments: attachmentPayload,
+      })
+    : text
+      ? await resend.emails.send({
+          from: "Studio Daï Oakes <admin@studiodaioakes.com>",
+          to: recipients,
+          subject,
+          text,
+          replyTo,
+          attachments: attachmentPayload,
+        })
+      : (() => {
+          throw new Error(`Email failed: no content provided (subject: ${subject})`);
+        })();
 
   if (error) throw new Error(`Email failed: ${error.message}`);
   return data;

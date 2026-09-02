@@ -36,12 +36,18 @@ function RemindersContent() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["google-calendar-status"] }),
   });
 
-  const isConnected = !!calendarStatus.data?.connected;
+  // These endpoints return either the real payload or a plain `{ message }` error
+  // object, so narrow with an `in` check before touching payload-only fields.
+  const calendarStatusData =
+    calendarStatus.data && "configured" in calendarStatus.data ? calendarStatus.data : null;
+  const isConnected = !!calendarStatusData?.connected;
   const calendars = useQuery({
     queryKey: ["google-calendar-list"],
     queryFn: async () => (await api["google-calendar"].calendars.$get()).json(),
     enabled: isConnected,
   });
+  const calendarsList = calendars.data && "calendars" in calendars.data ? calendars.data.calendars : [];
+  const overdueList = overdue.data && "overdue" in overdue.data ? overdue.data.overdue : [];
 
   const selectCalendar = useMutation({
     mutationFn: async (calendarId: string) =>
@@ -105,18 +111,18 @@ function RemindersContent() {
           </div>
         )}
 
-        {!calendarStatus.isLoading && !calendarStatus.data?.configured && (
+        {!calendarStatus.isLoading && !calendarStatusData?.configured && (
           <div className="rounded-md bg-secondary/50 text-sm px-3 py-2 text-muted-foreground">
             Not configured yet — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the app's environment variables
             first.
           </div>
         )}
 
-        {calendarStatus.data?.configured && (
+        {calendarStatusData?.configured && (
           <div className="flex items-center justify-between flex-wrap gap-3">
-            {calendarStatus.data.connected ? (
+            {calendarStatusData.connected ? (
               <div className="flex items-center gap-2 text-sm text-green-700">
-                <CalendarCheck className="size-4" /> Connected as {calendarStatus.data.email}
+                <CalendarCheck className="size-4" /> Connected as {calendarStatusData.email}
               </div>
             ) : (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -124,7 +130,7 @@ function RemindersContent() {
               </div>
             )}
             <div>
-              {calendarStatus.data.connected ? (
+              {calendarStatusData.connected ? (
                 <Button
                   variant="outline"
                   onClick={() => disconnectCalendar.mutate()}
@@ -139,7 +145,7 @@ function RemindersContent() {
           </div>
         )}
 
-        {calendarStatus.data?.configured && isConnected && (
+        {calendarStatusData?.configured && isConnected && (
           <div className="mt-4 border-t border-border pt-4">
             <label className="block text-sm font-medium mb-1">Agenda de agendamentos</label>
             <p className="text-xs text-muted-foreground mb-2">
@@ -148,12 +154,12 @@ function RemindersContent() {
             </p>
             <select
               className="w-full max-w-md rounded-md border border-border bg-background px-3 py-2 text-sm"
-              value={calendarStatus.data.selectedCalendarId ?? "primary"}
+              value={calendarStatusData.selectedCalendarId ?? "primary"}
               disabled={calendars.isLoading || selectCalendar.isPending}
               onChange={(e) => selectCalendar.mutate(e.target.value)}
             >
               {calendars.isLoading && <option>Carregando agendas…</option>}
-              {(calendars.data?.calendars ?? [])
+              {calendarsList
                 .filter((cal) => cal.accessRole === "owner" || cal.accessRole === "writer")
                 .map((cal) => (
                   <option key={cal.id} value={cal.id}>
@@ -211,7 +217,7 @@ function RemindersContent() {
               </tr>
             </thead>
             <tbody>
-              {(overdue.data?.overdue ?? []).map((inv) => (
+              {overdueList.map((inv) => (
                 <tr key={inv.id} className="border-t border-border">
                   <td className="px-4 py-3 font-medium">{inv.invoiceNumber}</td>
                   <td className="px-4 py-3">{inv.clientName ?? "—"}</td>
@@ -222,7 +228,7 @@ function RemindersContent() {
                   <td className="px-4 py-3">{inv.reminderCount}</td>
                 </tr>
               ))}
-              {(overdue.data?.overdue ?? []).length === 0 && (
+              {overdueList.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                     No overdue invoices. 🎉

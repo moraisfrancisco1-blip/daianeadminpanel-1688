@@ -55,11 +55,12 @@ const TEXT_MUTED = "#6B6259";
 
 export function generateInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    // font: false skips PDFKit's eager load of the "Helvetica" standard font at
-    // construction time — we register and use only our own embedded TTFs below.
-    const doc = new PDFDocument({ margin: 0, size: "A4", font: false });
+    // Omitting `font` skips PDFKit's eager load of the "Helvetica" standard font
+    // at construction time (it only loads one when the option is truthy) — we
+    // register and use only our own embedded TTFs below.
+    const doc = new PDFDocument({ margin: 0, size: "A4" });
     const chunks: Buffer[] = [];
-    doc.on("data", (c) => chunks.push(c));
+    doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 

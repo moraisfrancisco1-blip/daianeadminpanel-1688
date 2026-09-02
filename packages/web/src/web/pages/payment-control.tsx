@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
-import { RefreshCw, CheckCircle2, AlertTriangle, Clock, XCircle, Loader2, ShieldCheck, ShieldAlert } from "lucide-react";
+import { RefreshCw, CheckCircle2, AlertTriangle, Clock, Loader2, ShieldCheck, ShieldAlert } from "lucide-react";
 
 type PayRow = {
   invoiceId: number;
