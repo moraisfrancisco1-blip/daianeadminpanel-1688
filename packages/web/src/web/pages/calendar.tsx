@@ -3,7 +3,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Link, useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle } from "lucide-react";
+
+const FAR_DATE_WARNING_DAYS = 15;
+
+/** How many days a YYYY-MM-DD date is from today (negative = in the past). */
+function daysFromToday(dateStr: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(`${dateStr}T00:00:00`);
+  return Math.round((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+}
 
 type BookingItem = {
   id: number;
@@ -650,6 +660,14 @@ function BookingDetailModal(props: {
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
             />
           </div>
+          {date && Math.abs(daysFromToday(date)) > FAR_DATE_WARNING_DAYS && (
+            <p className="flex items-center gap-1.5 text-xs text-amber-600">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+              {" — "}
+              {daysFromToday(date) > 0 ? "isto é daqui a" : "isto foi há"} {Math.abs(daysFromToday(date))} dias. Confirma que é a data certa.
+            </p>
+          )}
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}

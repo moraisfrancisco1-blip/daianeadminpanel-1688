@@ -8,6 +8,16 @@ import { ArrowLeft, Loader2, Calendar, Clock, User, Mail, Phone, FileText, Searc
 
 type ClientSuggestion = { id: number; name: string; email: string | null; phone: string | null };
 
+const FAR_DATE_WARNING_DAYS = 15;
+
+/** How many days a YYYY-MM-DD date is from today (negative = in the past). */
+function daysFromToday(dateStr: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(`${dateStr}T00:00:00`);
+  return Math.round((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+}
+
 export default function BookingManualPage() {
   return (
     <Protected>
@@ -349,6 +359,14 @@ function BookingManualContent() {
                     required
                   />
                 </div>
+                {formData.date && Math.abs(daysFromToday(formData.date)) > FAR_DATE_WARNING_DAYS && (
+                  <p className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-600">
+                    <AlertTriangle className="size-3.5 shrink-0" />
+                    {new Date(`${formData.date}T00:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                    {" — "}
+                    {daysFromToday(formData.date) > 0 ? "isto é daqui a" : "isto foi há"} {Math.abs(daysFromToday(formData.date))} dias. Confirma que é a data certa.
+                  </p>
+                )}
               </div>
 
               <div>
