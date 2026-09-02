@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { invoices, clients } from "../database/schema";
-import { eq, and, gte, lt } from "drizzle-orm";
+import { invoices, clients, refunds } from "../database/schema";
+import { eq, and, gte, lt, inArray } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { generateMonthlyExcel } from "../lib/excel-export";
 
@@ -14,6 +14,7 @@ export const exportsRoute = new Hono().get("/monthly", requireAuth, async (c) =>
 
   const rows = await db
     .select({
+      invoiceId: invoices.id,
       invoiceNumber: invoices.invoiceNumber,
       clientName: clients.name,
       issueDate: invoices.issueDate,
@@ -28,9 +29,32 @@ export const exportsRoute = new Hono().get("/monthly", requireAuth, async (c) =>
     .leftJoin(clients, eq(invoices.clientId, clients.id))
     .where(and(gte(invoices.issueDate, start), lt(invoices.issueDate, end)));
 
+  const invoiceIds = rows.map((r) => r.invoiceId);
+  const monthRefunds = invoiceIds.length
+    ? await db.select().from(refunds).where(inArray(refunds.invoiceId, invoiceIds))
+    : [];
+  const refundedByInvoice = new Map<number, number>();
+  for (const r of monthRefunds) {
+    if (r.status !== "succeeded") continue;
+    refundedByInvoice.set(r.invoiceId, (refundedByInvoice.get(r.invoiceId) ?? 0) + r.amount);
+  }
+  const invoiceById = new Map(rows.map((r) => [r.invoiceId, r]));
+
   const monthLabel = `${start.toLocaleString("en-GB", { month: "long" })} ${year}`;
   const buffer = await generateMonthlyExcel(
-    rows.map((r) => ({ ...r, clientName: r.clientName ?? "Unknown" })),
+    rows.map((r) => ({
+      ...r,
+      clientName: r.clientName ?? "Unknown",
+      refundedAmount: refundedByInvoice.get(r.invoiceId) ?? 0,
+    })),
+    monthRefunds.map((r) => ({
+      invoiceNumber: invoiceById.get(r.invoiceId)?.invoiceNumber ?? `#${r.invoiceId}`,
+      clientName: invoiceById.get(r.invoiceId)?.clientName ?? "Unknown",
+      amount: r.amount,
+      reason: r.reason,
+      status: r.status,
+      createdAt: r.createdAt,
+    })),
     monthLabel,
   );
 

@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { StatusPill } from "../components/status-pill";
 import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
-import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
+import { SearchInput, SortableTh, EmptyRow, StatusFilter } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, cmpNumberLike, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { netToGross } from "../../api/lib/totals";
 import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil, Link2, Copy, ExternalLink, History } from "lucide-react";
@@ -50,6 +50,7 @@ interface InvoiceRow {
   isTest: boolean;
   sessionDate: string | null;
   sessionStartTime: string | null;
+  refundedAmount: number;
 }
 
 type InvoiceSortKey = "number" | "client" | "date" | "total" | "status";
@@ -71,6 +72,7 @@ function InvoicesContent() {
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const { sortKey, sortDir, toggle } = useSort<InvoiceSortKey>("date", "desc");
   const [paymentLinkInvoice, setPaymentLinkInvoice] = useState<InvoiceRow | null>(null);
   const [historyInvoice, setHistoryInvoice] = useState<InvoiceRow | null>(null);
@@ -289,6 +291,7 @@ function InvoicesContent() {
   const q = normalize(search);
   const exactId = idFromQuery(search);
   const filtered = invoices.filter((inv) => {
+    if (statusFilter !== "all" && inv.status !== statusFilter) return false;
     if (!q) return true;
     if (matchesId(inv.id, search)) return true;
     return normalize([inv.invoiceNumber, inv.clientName, inv.clientEmail, inv.stripePaymentIntentId].filter(Boolean).join(" ")).includes(q);
@@ -316,7 +319,21 @@ function InvoicesContent() {
         </Button>
       </div>
 
-      <SearchInput value={search} onChange={setSearch} placeholder="Search by number, client, email, ID or PaymentIntent…" />
+      <div className="flex flex-col gap-3">
+        <SearchInput value={search} onChange={setSearch} placeholder="Search by number, client, email, ID or PaymentIntent…" />
+        <StatusFilter
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: "all", label: "All" },
+            { value: "draft", label: "Draft" },
+            { value: "sent", label: "Sent" },
+            { value: "paid", label: "Paid" },
+            { value: "overdue", label: "Overdue" },
+            { value: "cancelled", label: "Cancelled" },
+          ]}
+        />
+      </div>
 
       {invoicesLoading ? (
         <div className="space-y-2">
@@ -363,9 +380,14 @@ function InvoicesContent() {
                         })()
                       : <span className="italic opacity-70">No session</span>}
                   </td>
-                  <td className="px-4 py-3 font-medium">€{inv.total.toFixed(2)}</td>
+                  <td className="px-4 py-3 font-medium">
+                    €{inv.total.toFixed(2)}
+                    {inv.refundedAmount > 0 && (
+                      <p className="text-xs font-normal text-purple-600">-€{inv.refundedAmount.toFixed(2)} refunded</p>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
-                    <StatusPill status={inv.status} />
+                    <StatusPill status={inv.refundedAmount > 0 ? (inv.refundedAmount >= inv.total ? "refunded" : "partially_refunded") : inv.status} />
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { invoices, invoiceItems, clients, payments, bookings, invoiceActivity, emailLog } from "../database/schema";
+import { invoices, invoiceItems, clients, payments, bookings, invoiceActivity, emailLog, refunds } from "../database/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { computeTotals, vatBreakdownFromNet } from "../lib/totals";
@@ -110,7 +110,18 @@ export const invoicesRoute = new Hono()
       .leftJoin(clients, eq(invoices.clientId, clients.id))
       .leftJoin(bookings, eq(invoices.bookingId, bookings.id))
       .orderBy(desc(invoices.issueDate));
-    return c.json({ invoices: all }, 200);
+
+    const allRefunds = await db.select().from(refunds);
+    const refundedByInvoice = new Map<number, number>();
+    for (const r of allRefunds) {
+      if (r.status !== "succeeded") continue;
+      refundedByInvoice.set(r.invoiceId, (refundedByInvoice.get(r.invoiceId) ?? 0) + r.amount);
+    }
+
+    return c.json(
+      { invoices: all.map((inv) => ({ ...inv, refundedAmount: refundedByInvoice.get(inv.id) ?? 0 })) },
+      200,
+    );
   })
   .get("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
@@ -129,7 +140,8 @@ export const invoicesRoute = new Hono()
       .from(emailLog)
       .where(eq(emailLog.invoiceId, id))
       .orderBy(desc(emailLog.createdAt));
-    return c.json({ invoice, items, client, payments: invoicePayments, activity, emails }, 200);
+    const invoiceRefunds = await db.select().from(refunds).where(eq(refunds.invoiceId, id));
+    return c.json({ invoice, items, client, payments: invoicePayments, activity, emails, refunds: invoiceRefunds }, 200);
   })
   .post("/", requireAuth, async (c) => {
     const body = await c.req.json();
