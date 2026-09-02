@@ -16,23 +16,22 @@ const STYLES: Record<string, string> = {
   partially_refunded: "bg-purple-400/15 text-purple-600",
 };
 
-// The underlying status values stay in English (they're the actual database
-// values, shared with backend logic) — only what's shown on screen is
-// translated, so a non-technical reader isn't stuck decoding English jargon.
-const LABEL_PT: Record<string, string> = {
-  paid: "Paga",
-  sent: "Enviada",
-  draft: "Rascunho",
-  overdue: "Vencida",
-  cancelled: "Cancelada",
-  accepted: "Aceite",
-  declined: "Recusada",
-  pending_deposit: "Depósito pendente",
-  confirmed: "Confirmada",
-  no_show: "Não compareceu",
-  completed: "Concluída",
-  refunded: "Reembolsada",
-  partially_refunded: "Parcialmente reembolsada",
+// Friendlier wording than the raw database status word (e.g. "no_show"),
+// spelled out explicitly rather than relying on find/replace + capitalize.
+const LABEL: Record<string, string> = {
+  paid: "Paid",
+  sent: "Sent",
+  draft: "Draft",
+  overdue: "Overdue",
+  cancelled: "Cancelled",
+  accepted: "Accepted",
+  declined: "Declined",
+  pending_deposit: "Pending deposit",
+  confirmed: "Confirmed",
+  no_show: "No-show",
+  completed: "Completed",
+  refunded: "Refunded",
+  partially_refunded: "Partially refunded",
 };
 
 export function StatusPill({ status }: { status: string }) {
@@ -43,7 +42,7 @@ export function StatusPill({ status }: { status: string }) {
         STYLES[status] ?? "bg-muted text-muted-foreground",
       )}
     >
-      {LABEL_PT[status] ?? status.replace(/_/g, " ")}
+      {LABEL[status] ?? status.replace(/_/g, " ")}
     </span>
   );
 }

@@ -47,7 +47,7 @@ function ActionButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${ACTION_TONE[tone]}`}
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] leading-4 font-medium whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${ACTION_TONE[tone]}`}
     >
       {icon} {label}
     </button>
@@ -451,70 +451,70 @@ function InvoicesContent() {
                     <StatusPill status={inv.refundedAmount > 0 ? (inv.refundedAmount >= inv.total ? "refunded" : "partially_refunded") : inv.status} />
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap items-center justify-end gap-1.5 max-w-[420px] ml-auto">
+                    <div className="flex flex-wrap items-center justify-end gap-1 max-w-[380px] ml-auto">
                       <ActionButton
                         onClick={() => setHistoryInvoice(inv)}
-                        icon={<History className="size-3.5" />}
-                        label="Histórico"
+                        icon={<History className="size-3" />}
+                        label="History"
                         tone="primary"
-                        title="O que aconteceu com esta fatura — quando foi enviada, paga, etc."
+                        title="What happened with this invoice — when it was sent, paid, etc."
                       />
                       <ActionButton
                         onClick={() => sendInvoice.mutate(inv.id)}
                         disabled={sendInvoice.isPending && sendInvoice.variables === inv.id}
-                        icon={sendInvoice.isPending && sendInvoice.variables === inv.id ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
-                        label="Enviar"
-                        title="Enviar a fatura por email ao cliente"
+                        icon={sendInvoice.isPending && sendInvoice.variables === inv.id ? <Loader2 className="size-3 animate-spin" /> : <Send className="size-3" />}
+                        label="Send"
+                        title="Email the invoice to the client"
                       />
                       {inv.status !== "paid" && (
                         <ActionButton
                           onClick={() => requestPaymentLink(inv)}
                           disabled={checkoutLoading && paymentLinkInvoice?.id === inv.id}
-                          icon={checkoutLoading && paymentLinkInvoice?.id === inv.id ? <Loader2 className="size-3.5 animate-spin" /> : <Link2 className="size-3.5" />}
-                          label="Link de pagamento"
-                          title="Gerar/enviar um link de pagamento Stripe"
+                          icon={checkoutLoading && paymentLinkInvoice?.id === inv.id ? <Loader2 className="size-3 animate-spin" /> : <Link2 className="size-3" />}
+                          label="Payment link"
+                          title="Create/send a Stripe payment link"
                         />
                       )}
                       {inv.status !== "paid" && (
                         <ActionButton
                           onClick={() => markPaid.mutate(inv.id)}
-                          icon={<CheckCircle2 className="size-3.5" />}
-                          label="Marcar paga"
+                          icon={<CheckCircle2 className="size-3" />}
+                          label="Mark paid"
                           tone="success"
-                          title="Marcar como paga manualmente (ex: dinheiro, transferência)"
+                          title="Mark as paid manually (e.g. cash, bank transfer)"
                         />
                       )}
                       <ActionButton
                         onClick={() => handleDownload(inv.id, inv.invoiceNumber)}
                         disabled={downloadingId === inv.id}
-                        icon={downloadingId === inv.id ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                        icon={downloadingId === inv.id ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
                         label="PDF"
-                        title="Descarregar o PDF da fatura"
+                        title="Download the invoice PDF"
                       />
                       <ActionButton
                         onClick={() => openEditForm(inv)}
-                        icon={<Pencil className="size-3.5" />}
-                        label="Editar"
-                        title="Editar os itens da fatura"
+                        icon={<Pencil className="size-3" />}
+                        label="Edit"
+                        title="Edit the invoice line items"
                       />
                       {inv.status !== "paid" && inv.status !== "cancelled" && (
                         <ActionButton
                           onClick={() => handleCancel(inv.id, inv.invoiceNumber)}
                           disabled={cancelInvoice.isPending && cancelInvoice.variables === inv.id}
-                          icon={<Ban className="size-3.5" />}
-                          label="Cancelar"
+                          icon={<Ban className="size-3" />}
+                          label="Cancel"
                           tone="purple"
-                          title="Cancelar (mantém o número para o contabilista, deixa de contar como receita)"
+                          title="Cancel (keeps the number for your accountant, stops counting as revenue)"
                         />
                       )}
                       {inv.status === "draft" && (
                         <ActionButton
                           onClick={() => handleDelete(inv.id, inv.invoiceNumber)}
                           disabled={deleteInvoice.isPending && deleteInvoice.variables === inv.id}
-                          icon={deleteInvoice.isPending && deleteInvoice.variables === inv.id ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-                          label="Apagar"
+                          icon={deleteInvoice.isPending && deleteInvoice.variables === inv.id ? <Loader2 className="size-3 animate-spin" /> : <Trash2 className="size-3" />}
+                          label="Delete"
                           tone="danger"
-                          title="Apagar rascunho (só possível antes de ser enviado)"
+                          title="Delete draft (only possible before it's sent)"
                         />
                       )}
                     </div>
@@ -655,13 +655,13 @@ function InvoiceHistoryModal({ invoice, onClose }: { invoice: InvoiceRow; onClos
   const refunds: any[] = detail.data?.refunds ?? [];
 
   const EMAIL_TYPE_LABEL: Record<string, string> = {
-    invoice: "fatura",
-    payment_link: "link de pagamento",
-    booking_confirmation: "confirmação de marcação",
-    reminder: "lembrete",
-    cancellation: "cancelamento",
-    quote: "orçamento",
-    package: "pacote",
+    invoice: "invoice",
+    payment_link: "payment link",
+    booking_confirmation: "booking confirmation",
+    reminder: "reminder",
+    cancellation: "cancellation",
+    quote: "quote",
+    package: "package",
     other: "email",
   };
 
@@ -669,23 +669,22 @@ function InvoiceHistoryModal({ invoice, onClose }: { invoice: InvoiceRow; onClos
   const entries: Entry[] = [
     ...activity.map((a): Entry => {
       const labels: Record<string, { icon: string; label: string }> = {
-        created: { icon: "📝", label: "Fatura criada" },
-        edited: { icon: "✏️", label: "Fatura editada" },
-        sent: { icon: "📨", label: "Marcada como enviada" },
-        payment_link_created: { icon: "🔗", label: "Link de pagamento criado" },
-        payment_link_sent: { icon: "🔗", label: "Link de pagamento enviado" },
-        status_changed: { icon: "🔄", label: "Estado alterado" },
-        payment_recorded: { icon: "💶", label: "Pagamento registado" },
-        payment_confirmed: { icon: "✅", label: "Pagamento confirmado pelo Stripe" },
-        refunded: { icon: "↩️", label: "Reembolso" },
-        email_failed: { icon: "⚠️", label: "Falha ao enviar email" },
-        cancelled: { icon: "🚫", label: "Fatura cancelada" },
+        created: { icon: "📝", label: "Invoice created" },
+        edited: { icon: "✏️", label: "Invoice edited" },
+        sent: { icon: "📨", label: "Marked as sent" },
+        payment_link_created: { icon: "🔗", label: "Payment link created" },
+        payment_link_sent: { icon: "🔗", label: "Payment link sent" },
+        status_changed: { icon: "🔄", label: "Status changed" },
+        payment_recorded: { icon: "💶", label: "Payment recorded" },
+        payment_confirmed: { icon: "✅", label: "Payment confirmed by Stripe" },
+        refunded: { icon: "↩️", label: "Refund" },
+        email_failed: { icon: "⚠️", label: "Email failed to send" },
+        cancelled: { icon: "🚫", label: "Invoice cancelled" },
       };
       const meta = labels[a.type] ?? { icon: "•", label: a.type };
-      const STATUS_PT: Record<string, string> = { draft: "rascunho", sent: "enviada", paid: "paga", cancelled: "cancelada", overdue: "vencida" };
       let detailText = "";
       if (a.type === "status_changed" && a.oldStatus && a.newStatus) {
-        detailText = `${STATUS_PT[a.oldStatus] ?? a.oldStatus} → ${STATUS_PT[a.newStatus] ?? a.newStatus}`;
+        detailText = `${a.oldStatus} → ${a.newStatus}`;
       } else if (a.type === "payment_confirmed" || a.type === "payment_recorded" || a.type === "refunded") {
         detailText = `€${(a.amount ?? 0).toFixed(2)}${a.method ? ` · ${a.method}` : ""}`;
       }
@@ -695,8 +694,8 @@ function InvoiceHistoryModal({ invoice, onClose }: { invoice: InvoiceRow; onClos
       (e): Entry => ({
         ts: new Date(e.createdAt).getTime(),
         icon: e.status === "failed" ? "⚠️" : "📧",
-        label: e.status === "failed" ? "Email não foi enviado" : "Email enviado de verdade",
-        detail: `${EMAIL_TYPE_LABEL[e.type] ?? e.type} · para ${e.recipientEmail}${e.status === "failed" && e.error ? ` — ${e.error}` : ""}`,
+        label: e.status === "failed" ? "Email did not send" : "Email actually sent",
+        detail: `${EMAIL_TYPE_LABEL[e.type] ?? e.type} · to ${e.recipientEmail}${e.status === "failed" && e.error ? ` — ${e.error}` : ""}`,
         tone: e.status === "failed" ? "text-destructive" : "text-[#4C7A56]",
       }),
     ),
@@ -704,7 +703,7 @@ function InvoiceHistoryModal({ invoice, onClose }: { invoice: InvoiceRow; onClos
       (r): Entry => ({
         ts: new Date(r.createdAt).getTime(),
         icon: "↩️",
-        label: r.status === "succeeded" ? "Reembolso feito" : `Reembolso (${r.status})`,
+        label: r.status === "succeeded" ? "Refund issued" : `Refund (${r.status})`,
         detail: `€${r.amount.toFixed(2)}${r.reason ? ` · ${r.reason}` : ""}`,
         tone: "text-purple-600",
       }),
@@ -723,7 +722,7 @@ function InvoiceHistoryModal({ invoice, onClose }: { invoice: InvoiceRow; onClos
         <button onClick={onClose} className="absolute top-4 right-4 text-muted-foreground">
           <X className="size-4" />
         </button>
-        <h2 className="font-display text-xl font-semibold">Fatura {invoice.invoiceNumber}</h2>
+        <h2 className="font-display text-xl font-semibold">Invoice {invoice.invoiceNumber}</h2>
         <div className="flex items-center gap-2 flex-wrap">
           <StatusPill status={effectiveStatus} />
           <span className="text-sm text-muted-foreground">€{invoice.total.toFixed(2)}</span>
@@ -733,13 +732,13 @@ function InvoiceHistoryModal({ invoice, onClose }: { invoice: InvoiceRow; onClos
             <Loader2 className="size-5 animate-spin mx-auto" />
           </div>
         ) : entries.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4">Ainda não aconteceu nada com esta fatura.</p>
+          <p className="text-sm text-muted-foreground py-4">Nothing has happened with this invoice yet.</p>
         ) : (
           <ol className="space-y-3 border-l-2 border-border pl-4">
             {entries.map((e, i) => (
               <li key={i} className="relative">
                 <span className="absolute -left-[25px] top-0 text-base leading-none">{e.icon}</span>
-                <p className="text-xs text-muted-foreground">{new Date(e.ts).toLocaleString("pt-PT", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+                <p className="text-xs text-muted-foreground">{new Date(e.ts).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
                 <p className="font-medium">{e.label}</p>
                 {e.detail && <p className={`text-sm ${e.tone ?? "text-muted-foreground"}`}>{e.detail}</p>}
               </li>
