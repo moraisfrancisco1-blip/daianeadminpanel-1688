@@ -291,7 +291,11 @@ export const emailLog = sqliteTable(
     error: text("error"),
     provider: text("provider").notNull().default("resend"),
     // "historical_import" = imported from the provider; "current_system" = sent by the running platform.
-    source: text("source").notNull().default("current_system"),
+    // Default matches the column's actual default in production (set before this
+    // was renamed to "current_system" in application code, which always passes
+    // it explicitly) — kept in sync so drizzle-kit push doesn't see a false diff
+    // and try to rebuild this table over a mismatched DEFAULT.
+    source: text("source").notNull().default("system"),
   },
   (table) => [
     // Dedup / idempotency for historical imports — one row per provider message id.
