@@ -378,9 +378,12 @@ export const bookingsRoute = new Hono()
         depositStatus: bookings.depositStatus,
         payFullNow: bookings.payFullNow,
         invoiceId: bookings.invoiceId,
+        invoiceStatus: invoices.status,
+        invoiceNumber: invoices.invoiceNumber,
       })
       .from(bookings)
       .leftJoin(services, eq(bookings.serviceId, services.id))
+      .leftJoin(invoices, eq(bookings.invoiceId, invoices.id))
       .orderBy(desc(bookings.createdAt));
     return c.json({ bookings: all }, 200);
   })
@@ -436,12 +439,14 @@ export const bookingsRoute = new Hono()
     const isFullPayment = booking!.depositAmount >= service.price;
 
     // Create an Admin invoice for the amount the client still owes
-    // (service price minus any deposit already accounted for).
+    // (service price minus any deposit already accounted for) — unless the
+    // admin explicitly opted out (e.g. cash payment handled outside the app).
     // No Stripe Checkout Session is created here — the admin sends the payment
     // link later from the invoice or the booking detail.
     const deposit = booking!.depositAmount || 0;
     const pendingAmount = Number((service.price - deposit).toFixed(2));
-    if (pendingAmount > 0) {
+    const generateInvoice = body.generateInvoice !== false;
+    if (pendingAmount > 0 && generateInvoice) {
       const vatRate = service.vatRate;
       const { net, vat } = computeVat(pendingAmount, vatRate);
       const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
@@ -454,7 +459,10 @@ export const bookingsRoute = new Hono()
           invoiceNumber,
           clientId: client!.id,
           bookingId: booking!.id,
-          status: "sent",
+          // "draft" — this only creates the invoice record. It's marked "sent"
+          // only once an email is actually sent (via /invoices/:id/send or the
+          // booking's Send Invoice button), never before.
+          status: "draft",
           issueDate,
           dueDate,
           notes: `Booking payment — ${service.name}`,

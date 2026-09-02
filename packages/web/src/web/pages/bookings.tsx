@@ -6,7 +6,7 @@ import { StatusPill } from "../components/status-pill";
 import { SearchInput, SortableTh, EmptyRow, StatusFilter } from "../components/data-table";
 import { useSort, cmpStr, cmpDate, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { Link } from "wouter";
-import { Trash2, Loader2, Plus } from "lucide-react";
+import { Trash2, Loader2, Plus, Send, CheckCircle2 } from "lucide-react";
 
 type BookingItem = {
   id: number;
@@ -23,6 +23,8 @@ type BookingItem = {
   depositStatus: string;
   payFullNow: boolean;
   invoiceId: number | null;
+  invoiceStatus: string | null;
+  invoiceNumber: string | null;
 };
 
 type BookingSortKey = "date" | "client" | "service" | "status";
@@ -64,6 +66,24 @@ function BookingsContent() {
       qc.invalidateQueries({ queryKey: ["calendar-bookings"] });
       setToast("Booking deleted.");
       setTimeout(() => setToast(null), 3000);
+    },
+  });
+
+  const sendInvoice = useMutation({
+    mutationFn: async (invoiceId: number) => {
+      const res = await api.invoices[":id"].send.$post({ param: { id: String(invoiceId) } });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to send invoice");
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bookings"] });
+      setToast("Invoice emailed to client.");
+      setTimeout(() => setToast(null), 3000);
+    },
+    onError: (err: any) => {
+      setToast(err?.message ?? "Failed to send invoice.");
+      setTimeout(() => setToast(null), 4000);
     },
   });
 
@@ -165,7 +185,29 @@ function BookingsContent() {
                   </td>
                   <td className="px-4 py-3">{b.serviceName ?? "—"}</td>
                   <td className="px-4 py-3">{b.date}</td>
-                  <td className="px-4 py-3">{b.startTime}</td>
+                  <td className="px-4 py-3">
+                    {b.startTime}
+                    {b.invoiceId && b.invoiceStatus !== "paid" && b.invoiceStatus !== "cancelled" && (
+                      <button
+                        onClick={() => sendInvoice.mutate(b.invoiceId!)}
+                        disabled={sendInvoice.isPending && sendInvoice.variables === b.invoiceId}
+                        className="ml-2 inline-flex items-center gap-1 text-xs text-brand-copper hover:underline disabled:opacity-50"
+                        title={`${b.invoiceStatus === "draft" ? "Send" : "Resend"} invoice ${b.invoiceNumber ?? ""}`}
+                      >
+                        {sendInvoice.isPending && sendInvoice.variables === b.invoiceId ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Send className="size-3.5" />
+                        )}
+                        {b.invoiceStatus === "draft" ? "Send invoice" : "Resend"}
+                      </button>
+                    )}
+                    {b.invoiceId && b.invoiceStatus === "paid" && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-xs text-[#4C7A56]" title={`Invoice ${b.invoiceNumber} paid`}>
+                        <CheckCircle2 className="size-3.5" /> Paid
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     €{b.depositAmount.toFixed(2)}{" "}
                     <span className="text-xs text-muted-foreground">({b.depositStatus})</span>

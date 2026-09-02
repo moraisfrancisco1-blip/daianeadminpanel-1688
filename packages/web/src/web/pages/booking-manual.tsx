@@ -46,6 +46,7 @@ function BookingManualContent() {
     startTime: initialTime,
     depositAmount: "",
     paymentMethod: "",
+    generateInvoice: true,
     notes: "",
   });
 
@@ -97,6 +98,7 @@ function BookingManualContent() {
           startTime: data.startTime,
           depositAmount: data.depositAmount ? Number(data.depositAmount) : null,
           paymentMethod: data.paymentMethod || null,
+          generateInvoice: data.generateInvoice,
           notes: data.notes || null,
         },
       });
@@ -122,6 +124,7 @@ function BookingManualContent() {
         startTime: "",
         depositAmount: "",
         paymentMethod: "",
+        generateInvoice: true,
         notes: "",
       });
       // Return to the Agenda (same week/date) when the form was opened from a double-click.
@@ -432,6 +435,24 @@ function BookingManualContent() {
                 <option value="ideal">iDEAL</option>
                 <option value="manual">Manual</option>
               </select>
+            </div>
+
+            <div>
+              <label className="flex items-start gap-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={formData.generateInvoice}
+                  onChange={(e) => setFormData({ ...formData, generateInvoice: e.target.checked })}
+                  className="mt-0.5 size-4"
+                />
+                <span>
+                  Generate an invoice automatically for the remaining balance
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    Turn this off if payment is already settled outside the app (e.g. cash on the day) — no invoice
+                    will be created. You can always add one later from the Invoices page.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div>
