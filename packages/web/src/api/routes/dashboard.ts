@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { invoices, clients, bookings, invoiceItems, services, payments, clientNotes } from "../database/schema";
+import { invoices, clients, bookings, invoiceItems, services, payments, clientNotes, packages } from "../database/schema";
 import { requireAuth } from "../middleware/auth";
 import { eq } from "drizzle-orm";
 import { stripe } from "../services/stripe";
@@ -475,7 +475,58 @@ export const dashboardRoute = new Hono()
           severity: "medium",
           title: `Cliente sem sessão · ${cl.name}`,
           detail: `Última sessão a ${amsDateOf(last)}`,
-          link: "/clients",
+          link: `/clients/${cl.id}`,
+        });
+      }
+    }
+
+    // 4b. Packages expiring soon or nearly used up (medium/high/info)
+    const allPackages = await db.select().from(packages);
+    const PACKAGE_EXPIRY_WARN_DAYS = 14;
+    for (const pkg of allPackages) {
+      const remaining = pkg.totalSessions - pkg.sessionsUsed;
+      if (remaining <= 0) continue;
+      const clientName = clientMap.get(pkg.clientId) ?? "Cliente";
+      if (pkg.expiresAt) {
+        const daysLeft = Math.ceil((pkg.expiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+        if (daysLeft >= 0 && daysLeft <= PACKAGE_EXPIRY_WARN_DAYS) {
+          alerts.push({
+            id: `package-expiring-${pkg.id}`,
+            severity: daysLeft <= 3 ? "high" : "medium",
+            title: `Pacote a expirar · ${clientName}`,
+            detail: `${pkg.name} · ${remaining} sessão${remaining === 1 ? "" : "s"} restante${remaining === 1 ? "" : "s"} · expira a ${amsDateOf(pkg.expiresAt)}`,
+            link: `/clients/${pkg.clientId}`,
+          });
+          continue;
+        }
+      }
+      if (remaining === 1) {
+        alerts.push({
+          id: `package-low-${pkg.id}`,
+          severity: "info",
+          title: `Última sessão do pacote · ${clientName}`,
+          detail: `${pkg.name} · 1 sessão restante`,
+          link: `/clients/${pkg.clientId}`,
+        });
+      }
+    }
+
+    // 4c. Upcoming birthdays within 7 days (info)
+    const BIRTHDAY_WINDOW_DAYS = 7;
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    for (const cl of allClients) {
+      if (!cl.dateOfBirth) continue;
+      const dob = new Date(cl.dateOfBirth);
+      let nextBirthday = new Date(now.getFullYear(), dob.getMonth(), dob.getDate());
+      if (nextBirthday < todayMidnight) nextBirthday = new Date(now.getFullYear() + 1, dob.getMonth(), dob.getDate());
+      const daysUntil = Math.round((nextBirthday.getTime() - todayMidnight.getTime()) / (24 * 60 * 60 * 1000));
+      if (daysUntil >= 0 && daysUntil <= BIRTHDAY_WINDOW_DAYS) {
+        alerts.push({
+          id: `birthday-${cl.id}-${nextBirthday.getFullYear()}`,
+          severity: "info",
+          title: daysUntil === 0 ? `Aniversário hoje · ${cl.name}` : `Aniversário em breve · ${cl.name}`,
+          detail: daysUntil === 0 ? "🎂 Hoje!" : `Daqui a ${daysUntil} dia${daysUntil === 1 ? "" : "s"}`,
+          link: `/clients/${cl.id}`,
         });
       }
     }
@@ -497,5 +548,7 @@ export const dashboardRoute = new Hono()
 
     const order: Record<Alert["severity"], number> = { high: 0, medium: 1, info: 2 };
     alerts.sort((a, b) => order[a.severity] - order[b.severity]);
-    return c.json({ alerts: alerts.slice(0, 8) }, 200);
+    // Raised from 8 now that packages/birthdays add more alert types — keeps
+    // higher-severity items from being pushed out by a busy info feed.
+    return c.json({ alerts: alerts.slice(0, 14) }, 200);
   });
