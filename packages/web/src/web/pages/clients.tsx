@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
+import { AddressLookupFields, type FoundAddress } from "../components/address-lookup-fields";
 import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { Plus, Mail, Phone, X, Pencil, Trash2 } from "lucide-react";
@@ -30,6 +31,27 @@ function ClientsContent() {
   const [deletingClient, setDeletingClient] = useState<any>(null);
   const qc = useQueryClient();
   const { sortKey, sortDir, toggle } = useSort<ClientSortKey>("name", "asc");
+
+  // Address inputs stay uncontrolled (read via FormData on submit), so a
+  // successful postcode lookup fills them imperatively through these refs —
+  // the fields remain editable afterwards rather than being locked to the API result.
+  const addAddressRef = useRef<HTMLInputElement>(null);
+  const addCityRef = useRef<HTMLInputElement>(null);
+  const addZipRef = useRef<HTMLInputElement>(null);
+  function fillAddAddress(found: FoundAddress) {
+    if (addAddressRef.current) addAddressRef.current.value = `${found.street} ${found.houseNumber}`.trim();
+    if (addCityRef.current) addCityRef.current.value = found.city;
+    if (addZipRef.current) addZipRef.current.value = found.postcode;
+  }
+
+  const editAddressRef = useRef<HTMLInputElement>(null);
+  const editCityRef = useRef<HTMLInputElement>(null);
+  const editZipRef = useRef<HTMLInputElement>(null);
+  function fillEditAddress(found: FoundAddress) {
+    if (editAddressRef.current) editAddressRef.current.value = `${found.street} ${found.houseNumber}`.trim();
+    if (editCityRef.current) editCityRef.current.value = found.city;
+    if (editZipRef.current) editZipRef.current.value = found.postcode;
+  }
 
   const clients = useQuery({
     queryKey: ["clients"],
@@ -183,6 +205,7 @@ function ClientsContent() {
                   email: fd.get("email"),
                   phone: fd.get("phone"),
                   address: fd.get("address"),
+                  zipCode: fd.get("zipCode"),
                   city: fd.get("city"),
                   country: fd.get("country"),
                   dateOfBirth: fd.get("dateOfBirth") || null,
@@ -194,11 +217,13 @@ function ClientsContent() {
               <input name="name" required placeholder="Name" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <input name="email" type="email" placeholder="Email" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <input name="phone" placeholder="Phone" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
-              <input name="address" placeholder="Address" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <AddressLookupFields onFound={fillAddAddress} />
+              <input ref={addAddressRef} name="address" placeholder="Address" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <div className="grid grid-cols-2 gap-3">
-                <input name="city" placeholder="City" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
-                <input name="country" placeholder="Country" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+                <input ref={addZipRef} name="zipCode" placeholder="Zip Code" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+                <input ref={addCityRef} name="city" placeholder="City" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               </div>
+              <input name="country" placeholder="Country" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground">Date of birth</label>
@@ -249,12 +274,13 @@ function ClientsContent() {
               <input name="name" required placeholder="Name" defaultValue={editingClient.name} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <input name="email" type="email" placeholder="Email" defaultValue={editingClient.email ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <input name="phone" placeholder="Phone" defaultValue={editingClient.phone ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
-              <input name="address" placeholder="Address (Morada)" defaultValue={editingClient.address ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
-              <input name="zipCode" placeholder="Zip Code" defaultValue={editingClient.zipCode ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <AddressLookupFields onFound={fillEditAddress} />
+              <input ref={editAddressRef} name="address" placeholder="Address (Morada)" defaultValue={editingClient.address ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <div className="grid grid-cols-2 gap-3">
-                <input name="city" placeholder="City" defaultValue={editingClient.city ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
-                <input name="country" placeholder="Country" defaultValue={editingClient.country ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+                <input ref={editZipRef} name="zipCode" placeholder="Zip Code" defaultValue={editingClient.zipCode ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+                <input ref={editCityRef} name="city" placeholder="City" defaultValue={editingClient.city ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               </div>
+              <input name="country" placeholder="Country" defaultValue={editingClient.country ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground">Date of birth</label>
