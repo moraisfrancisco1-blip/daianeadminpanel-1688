@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../database";
 import { invoices, clients, bookings, payments } from "../database/schema";
-import { eq, leftJoin, desc } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { derivePaymentState, verifyAndReconcileInvoice } from "../services/payment-reconcile";
 import { stripe } from "../services/stripe";

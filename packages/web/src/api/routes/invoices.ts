@@ -1,14 +1,13 @@
 import { Hono } from "hono";
 import { db } from "../database";
 import { invoices, invoiceItems, clients, payments, bookings, invoiceActivity, emailLog } from "../database/schema";
-import { eq, desc, leftJoin } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { computeTotals, vatBreakdownFromNet } from "../lib/totals";
 import { nextNumber, nextTestNumber } from "../lib/counters";
 import { generateInvoicePdf } from "../lib/invoice-pdf";
 import { buildInvoiceEmailHtml, buildPaymentLinkEmailHtml, buildAdminInvoicePaidHtml } from "../lib/email-templates";
 import { sendTrackedEmail } from "../services/email-log";
-import { sendEmail } from "../services/email";
 import { changeInvoiceStatus, recordInvoiceActivity } from "../services/invoice-activity";
 import { COMPANY } from "../lib/company";
 import { stripe } from "../services/stripe";

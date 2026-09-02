@@ -144,9 +144,20 @@ stripeWebhookRoute.post("/", async (c) => {
       case "invoice.paid": {
         const invoice = event.data.object as Stripe.Invoice;
         const invoiceId = invoice.id;
-        const paymentIntentId = invoice.payment_intent
-          ? (typeof invoice.payment_intent === "string" ? invoice.payment_intent : invoice.payment_intent.id)
-          : null;
+
+        // Stripe removed the direct `payment_intent` field from Invoice (API
+        // versions 2025-03-31+); the PaymentIntent now lives on the invoice's
+        // payment records instead. Look it up explicitly rather than reading
+        // a field that no longer exists (which silently resolved to
+        // `undefined` and skipped payment recording below).
+        let paymentIntentId: string | null = null;
+        if (invoiceId) {
+          const invoicePayments = await stripe.invoicePayments.list({ invoice: invoiceId });
+          const paidPayment = invoicePayments.data.find((p) => p.status === "paid");
+          const pi = paidPayment?.payment.payment_intent;
+          paymentIntentId = pi ? (typeof pi === "string" ? pi : pi.id) : null;
+        }
+
         const amountPaid = invoice.amount_paid ?? 0;
         const paidAt = invoice.status_transitions?.paid_at
           ? new Date(invoice.status_transitions.paid_at * 1000)
