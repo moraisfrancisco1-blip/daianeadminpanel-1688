@@ -19,6 +19,31 @@ export function SearchInput(props: {
   );
 }
 
+export function StatusFilter(props: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {props.options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => props.onChange(opt.value)}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+            props.value === opt.value
+              ? "bg-primary text-primary-foreground border-primary"
+              : "border-border text-muted-foreground hover:bg-accent"
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function SortableTh(props: {
   label: string;
   active: boolean;

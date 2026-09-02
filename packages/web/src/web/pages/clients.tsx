@@ -185,6 +185,8 @@ function ClientsContent() {
                   address: fd.get("address"),
                   city: fd.get("city"),
                   country: fd.get("country"),
+                  dateOfBirth: fd.get("dateOfBirth") || null,
+                  debtorNumber: fd.get("debtorNumber"),
                 });
               }}
               className="space-y-3"
@@ -196,6 +198,16 @@ function ClientsContent() {
               <div className="grid grid-cols-2 gap-3">
                 <input name="city" placeholder="City" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
                 <input name="country" placeholder="Country" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground">Date of birth</label>
+                  <input name="dateOfBirth" type="date" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Debtor number</label>
+                  <input name="debtorNumber" placeholder="Debtor #" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1" />
+                </div>
               </div>
               <Button type="submit" className="w-full" disabled={createClient.isPending}>
                 {createClient.isPending ? "Saving…" : "Save client"}
@@ -227,6 +239,8 @@ function ClientsContent() {
                     city: fd.get("city"),
                     country: fd.get("country"),
                     notes: fd.get("notes"),
+                    dateOfBirth: fd.get("dateOfBirth") || null,
+                    debtorNumber: fd.get("debtorNumber"),
                   },
                 });
               }}
@@ -240,6 +254,21 @@ function ClientsContent() {
               <div className="grid grid-cols-2 gap-3">
                 <input name="city" placeholder="City" defaultValue={editingClient.city ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
                 <input name="country" placeholder="Country" defaultValue={editingClient.country ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground">Date of birth</label>
+                  <input
+                    name="dateOfBirth"
+                    type="date"
+                    defaultValue={editingClient.dateOfBirth ? String(editingClient.dateOfBirth).slice(0, 10) : ""}
+                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Debtor number</label>
+                  <input name="debtorNumber" placeholder="Debtor #" defaultValue={editingClient.debtorNumber ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1" />
+                </div>
               </div>
               <textarea name="notes" placeholder="Notes" defaultValue={editingClient.notes ?? ""} rows={3} className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm resize-none" />
               <Button type="submit" className="w-full" disabled={updateClient.isPending}>

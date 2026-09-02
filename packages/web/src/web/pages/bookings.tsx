@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { StatusPill } from "../components/status-pill";
-import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
+import { SearchInput, SortableTh, EmptyRow, StatusFilter } from "../components/data-table";
 import { useSort, cmpStr, cmpDate, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { Link } from "wouter";
 import { Trash2, Loader2, Plus } from "lucide-react";
@@ -45,6 +45,7 @@ function BookingsContent() {
   const qc = useQueryClient();
   const [toast, setToast] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const { sortKey, sortDir, toggle } = useSort<BookingSortKey>("date", "asc");
 
   const bookings = useQuery({
@@ -76,6 +77,7 @@ function BookingsContent() {
   const q = normalize(search);
   const exactId = idFromQuery(search);
   const filtered = allBookings.filter((b) => {
+    if (statusFilter !== "all" && b.status !== statusFilter) return false;
     if (!q) return true;
     if (matchesId(b.id, search)) return true;
     if (b.clientId != null && matchesId(b.clientId, search)) return true;
@@ -109,7 +111,21 @@ function BookingsContent() {
         </Link>
       </div>
 
-      <SearchInput value={search} onChange={setSearch} placeholder="Search by client, service or #ID…" />
+      <div className="flex flex-col gap-3">
+        <SearchInput value={search} onChange={setSearch} placeholder="Search by client, service or #ID…" />
+        <StatusFilter
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: "all", label: "All" },
+            { value: "pending_deposit", label: "Pending deposit" },
+            { value: "confirmed", label: "Confirmed" },
+            { value: "completed", label: "Completed" },
+            { value: "no_show", label: "No-show" },
+            { value: "cancelled", label: "Cancelled" },
+          ]}
+        />
+      </div>
 
       {bookings.isLoading ? (
         <div className="space-y-2">
@@ -138,7 +154,13 @@ function BookingsContent() {
                 return (
                 <tr key={b.id} className={`border-t border-border hover:bg-accent/40 transition-colors ${isExact ? "bg-primary/10" : ""}`}>
                   <td className="px-4 py-3 font-medium">
-                    {b.name}
+                    {b.clientId ? (
+                      <Link to={`/clients/${b.clientId}`} className="hover:text-primary hover:underline">
+                        {b.name}
+                      </Link>
+                    ) : (
+                      b.name
+                    )}
                     <div className="text-xs text-muted-foreground">{b.email}</div>
                   </td>
                   <td className="px-4 py-3">{b.serviceName ?? "—"}</td>

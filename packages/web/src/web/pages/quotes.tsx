@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { StatusPill } from "../components/status-pill";
 import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
-import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
+import { SearchInput, SortableTh, EmptyRow, StatusFilter } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, cmpNumberLike, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { netToGross } from "../../api/lib/totals";
 import { Plus, X, ArrowRightCircle, Pencil, Trash2, Loader2 } from "lucide-react";
@@ -69,6 +69,7 @@ function QuotesContent() {
   const [deletePendingId, setDeletePendingId] = useState<number | null>(null);
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const { sortKey, sortDir, toggle } = useSort<QuoteSortKey>("date", "desc");
 
   function showToast(type: "success" | "error", message: string) {
@@ -217,6 +218,7 @@ function QuotesContent() {
   const q = normalize(search);
   const exactId = idFromQuery(search);
   const filtered = quotes.filter((quote) => {
+    if (statusFilter !== "all" && quote.status !== statusFilter) return false;
     if (!q) return true;
     if (matchesId(quote.id, search)) return true;
     return normalize([quote.quoteNumber, quote.clientName].filter(Boolean).join(" ")).includes(q);
@@ -244,7 +246,20 @@ function QuotesContent() {
         </Button>
       </div>
 
-      <SearchInput value={search} onChange={setSearch} placeholder="Search by number, client or #ID…" />
+      <div className="flex flex-col gap-3">
+        <SearchInput value={search} onChange={setSearch} placeholder="Search by number, client or #ID…" />
+        <StatusFilter
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: "all", label: "All" },
+            { value: "draft", label: "Draft" },
+            { value: "sent", label: "Sent" },
+            { value: "accepted", label: "Accepted" },
+            { value: "declined", label: "Declined" },
+          ]}
+        />
+      </div>
 
       {quotesLoading ? (
         <div className="space-y-2">
