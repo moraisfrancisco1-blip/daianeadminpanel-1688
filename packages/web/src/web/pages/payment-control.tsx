@@ -20,6 +20,7 @@ type PayRow = {
   lastStripeVerifiedAt: string | null;
   hasPayment: boolean;
   paymentMethod: string | null;
+  refundedAmount: number;
   state: string;
   problem: string | null;
   verified: boolean;
@@ -32,6 +33,8 @@ const STATE_META: Record<string, { label: string; cls: string; dot: string }> = 
   attention: { label: "ATTENTION REQUIRED", cls: "bg-red-600 text-white", dot: "🔴" },
   cancelled: { label: "CANCELLED", cls: "bg-neutral-400 text-white", dot: "⚪" },
   unknown: { label: "NEEDS VERIFICATION", cls: "bg-neutral-400 text-white", dot: "⚪" },
+  refunded: { label: "REFUNDED", cls: "bg-purple-600 text-white", dot: "🟣" },
+  partially_refunded: { label: "PARTIALLY REFUNDED", cls: "bg-purple-400 text-white", dot: "🟣" },
 };
 
 const PROBLEM_LABEL: Record<string, string> = {
@@ -141,6 +144,9 @@ function PaymentControlContent() {
           <span>Outstanding total: <strong className="text-foreground">€{(summary.outstandingTotal ?? 0).toFixed(2)}</strong></span>
           <span>Unknown / needs verification: <strong className="text-foreground">{summary.unknownCount ?? 0}</strong></span>
           <span>Cancelled: <strong className="text-foreground">{summary.cancelledCount ?? 0}</strong></span>
+          {(summary.refundedCount ?? 0) > 0 && (
+            <span>Refunded: <strong className="text-foreground">€{(summary.refundedTotal ?? 0).toFixed(2)}</strong> ({summary.refundedCount} invoice{summary.refundedCount === 1 ? "" : "s"})</span>
+          )}
         </div>
       )}
 
@@ -191,7 +197,12 @@ function PaymentControlContent() {
                         <p className="text-xs text-muted-foreground">{r.clientEmail ?? ""}</p>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{r.invoiceNumber}</td>
-                      <td className="px-4 py-3 font-medium">€{r.total.toFixed(2)}</td>
+                      <td className="px-4 py-3 font-medium">
+                        €{r.total.toFixed(2)}
+                        {r.refundedAmount > 0 && (
+                          <p className="text-xs font-normal text-purple-600">-€{r.refundedAmount.toFixed(2)} refunded</p>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {r.sessionDate ? `${r.sessionDate.slice(8, 10)} ${new Date(r.sessionDate + "T00:00:00").toLocaleString("en-GB", { month: "short" })}${r.sessionStartTime ? " " + r.sessionStartTime : ""}` : "—"}
                       </td>

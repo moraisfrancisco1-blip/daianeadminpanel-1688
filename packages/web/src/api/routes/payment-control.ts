@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { invoices, clients, bookings, payments } from "../database/schema";
+import { invoices, clients, bookings, payments, refunds } from "../database/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { derivePaymentState, verifyAndReconcileInvoice } from "../services/payment-reconcile";
@@ -40,9 +40,17 @@ export const paymentControlRoute = new Hono()
       payByInvoice.set(p.invoiceId, arr);
     }
 
+    const allRefunds = await db.select().from(refunds);
+    const refundedByInvoice = new Map<number, number>();
+    for (const r of allRefunds) {
+      if (r.status !== "succeeded") continue;
+      refundedByInvoice.set(r.invoiceId, (refundedByInvoice.get(r.invoiceId) ?? 0) + r.amount);
+    }
+
     const rows = all.map((inv) => {
       const plist = payByInvoice.get(inv.id) ?? [];
-      const { state, problem } = derivePaymentState(inv, plist.length > 0);
+      const refundedAmount = refundedByInvoice.get(inv.id) ?? 0;
+      const { state, problem } = derivePaymentState(inv, plist.length > 0, refundedAmount);
       return {
         invoiceId: inv.id,
         invoiceNumber: inv.invoiceNumber,
@@ -59,6 +67,7 @@ export const paymentControlRoute = new Hono()
         lastStripeVerifiedAt: inv.lastStripeVerifiedAt,
         hasPayment: plist.length > 0,
         paymentMethod: plist[0]?.method ?? null,
+        refundedAmount,
         state,
         problem,
         verified: !!inv.lastStripeVerifiedAt,
@@ -72,6 +81,8 @@ export const paymentControlRoute = new Hono()
     const attention = rows.filter((r) => r.state === "attention");
     const cancelled = rows.filter((r) => r.state === "cancelled");
     const unknown = rows.filter((r) => r.state === "unknown");
+    const refunded = rows.filter((r) => r.state === "refunded" || r.state === "partially_refunded");
+    const refundedTotal = Number(refunded.reduce((s, r) => s + r.refundedAmount, 0).toFixed(2));
 
     return c.json(
       {
@@ -86,6 +97,8 @@ export const paymentControlRoute = new Hono()
           attentionTotal: sum(attention),
           cancelledCount: cancelled.length,
           unknownCount: unknown.length,
+          refundedCount: refunded.length,
+          refundedTotal,
           outstandingTotal: sum([...awaiting, ...processing, ...attention]),
           stripeConfigured: !!stripe,
         },

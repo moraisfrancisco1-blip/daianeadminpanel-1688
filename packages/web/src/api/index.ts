@@ -16,6 +16,7 @@ import { reportsRoute } from "./routes/reports";
 import { packagesRoute } from "./routes/packages";
 import { emailsRoute } from "./routes/emails";
 import { paymentControlRoute } from "./routes/payment-control";
+import { refundsRoute } from "./routes/refunds";
 import { smsRoute } from "./routes/sms";
 import { reportVoltWatchEvent } from "./services/volt-watch";
 
@@ -55,6 +56,7 @@ const app = new Hono()
   .route("/packages", packagesRoute)
   .route("/emails", emailsRoute)
   .route("/payment-control", paymentControlRoute)
+  .route("/refunds", refundsRoute)
   .route("/google-calendar", googleCalendarRoute)
   .route("/sms", smsRoute);
 

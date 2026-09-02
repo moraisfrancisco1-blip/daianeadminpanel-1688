@@ -4,7 +4,15 @@ import { eq } from "drizzle-orm";
 import { stripe } from "./stripe";
 import { changeInvoiceStatus, recordInvoiceActivity } from "./invoice-activity";
 
-export type PaymentState = "confirmed" | "awaiting" | "processing" | "attention" | "cancelled" | "unknown";
+export type PaymentState =
+  | "confirmed"
+  | "awaiting"
+  | "processing"
+  | "attention"
+  | "cancelled"
+  | "unknown"
+  | "refunded"
+  | "partially_refunded";
 
 export type PaymentRow = {
   invoiceId: number;
@@ -28,7 +36,11 @@ export type PaymentRow = {
 };
 
 /** Derive the operational payment state from DB + stored Stripe snapshot (no live call). */
-export function derivePaymentState(invoice: any, hasPayment: boolean): { state: PaymentState; problem: string | null } {
+export function derivePaymentState(
+  invoice: any,
+  hasPayment: boolean,
+  refundedAmount = 0,
+): { state: PaymentState; problem: string | null } {
   if (invoice.status === "cancelled") return { state: "cancelled", problem: null };
   const cs = invoice.stripeCheckoutStatus;
   const pi = invoice.stripePaymentIntentStatus;
@@ -36,6 +48,9 @@ export function derivePaymentState(invoice: any, hasPayment: boolean): { state: 
   if (invoice.status === "paid") {
     if (!hasPayment) return { state: "attention", problem: "paid_but_no_payment_record" };
     if (!invoice.paidAt) return { state: "attention", problem: "paid_but_no_paid_at" };
+    if (refundedAmount > 0) {
+      return refundedAmount >= invoice.total ? { state: "refunded", problem: null } : { state: "partially_refunded", problem: null };
+    }
     return { state: "confirmed", problem: null };
   }
 

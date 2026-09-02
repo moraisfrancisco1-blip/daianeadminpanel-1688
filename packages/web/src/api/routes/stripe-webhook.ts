@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import { stripe } from "../services/stripe";
 import { syncStripeCustomerToLocal, findClientByStripeCustomerId, syncStripeInvoiceStatus, findInvoiceByStripeInvoiceId } from "../services/stripe-sync";
 import { db } from "../database";
-import { clients, invoices, bookings, services, invoiceItems, payments } from "../database/schema";
+import { clients, invoices, bookings, services, invoiceItems, payments, refunds } from "../database/schema";
 import { eq } from "drizzle-orm";
 import { nextNumber } from "../lib/counters";
 import { computeVat, DEFAULT_VAT_RATE } from "../lib/totals";
@@ -210,6 +210,52 @@ stripeWebhookRoute.post("/", async (c) => {
             .set({ stripeInvoiceId: null, stripePaymentIntentId: null })
             .where(eq(invoices.id, localInvoice.id));
         }
+        break;
+      }
+
+      // ==================== REFUND EVENTS ====================
+
+      case "charge.refunded": {
+        const charge = event.data.object as Stripe.Charge;
+        const paymentIntentId = typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id ?? null;
+        console.log("[stripe-webhook] Charge refunded:", charge.id, "pi:", paymentIntentId, "amount_refunded:", charge.amount_refunded);
+
+        if (!paymentIntentId) break;
+        const [localPayment] = await db.select().from(payments).where(eq(payments.stripePaymentIntentId, paymentIntentId));
+        if (!localPayment) {
+          console.log("[stripe-webhook] No local payment for refunded charge, skipping:", charge.id);
+          break;
+        }
+
+        // One row per Stripe Refund object — re-delivery of this event (e.g. a
+        // second partial refund on the same charge) upserts by stripeRefundId,
+        // so nothing is double-counted.
+        for (const r of charge.refunds?.data ?? []) {
+          const amount = Number((r.amount / 100).toFixed(2));
+          await db
+            .insert(refunds)
+            .values({
+              paymentId: localPayment.id,
+              invoiceId: localPayment.invoiceId,
+              amount,
+              reason: r.reason ?? null,
+              status: r.status ?? "succeeded",
+              stripeRefundId: r.id,
+            })
+            .onConflictDoUpdate({
+              target: refunds.stripeRefundId,
+              set: { status: r.status ?? "succeeded", amount },
+            });
+        }
+
+        await recordInvoiceActivity({
+          invoiceId: localPayment.invoiceId,
+          type: "refunded",
+          channel: "stripe",
+          amount: Number((charge.amount_refunded / 100).toFixed(2)),
+          method: "stripe",
+          metadata: { chargeId: charge.id, paymentIntentId },
+        });
         break;
       }
 

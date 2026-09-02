@@ -147,6 +147,22 @@ export const payments = sqliteTable(
   ],
 );
 
+// Refunds against a payment — recorded automatically from Stripe's charge.refunded
+// webhook (one row per Stripe Refund object, so partial refunds are tracked
+// individually). invoiceId is denormalized from the payment for easy querying.
+export const refunds = sqliteTable("refunds", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  paymentId: integer("payment_id").notNull(),
+  invoiceId: integer("invoice_id").notNull(),
+  amount: real("amount").notNull(),
+  reason: text("reason"), // duplicate | fraudulent | requested_by_customer | other
+  status: text("status").notNull().default("succeeded"), // pending | succeeded | failed | canceled
+  stripeRefundId: text("stripe_refund_id").unique(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export const bookings = sqliteTable("bookings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   clientId: integer("client_id"),
@@ -253,7 +269,7 @@ export const invoiceActivity = sqliteTable("invoice_activity", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   invoiceId: integer("invoice_id").notNull(),
   // created | edited | sent | payment_link_created | payment_link_sent | status_changed |
-  // payment_recorded | payment_confirmed | email_failed | cancelled | other
+  // payment_recorded | payment_confirmed | refunded | email_failed | cancelled | other
   type: text("type").notNull(),
   oldStatus: text("old_status"),
   newStatus: text("new_status"),
