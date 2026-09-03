@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Link, useParams } from "wouter";
-import { ArrowLeft, Mail, Phone, MapPin, Euro, CalendarClock, FileText, Receipt, StickyNote, Check, HeartPulse, Save } from "lucide-react";
+import { ArrowLeft, Mail, Phone, MapPin, Euro, CalendarClock, FileText, Receipt, StickyNote, Check, HeartPulse, Save, Undo2 } from "lucide-react";
 import { StatusPill } from "../components/status-pill";
 
 type Client = {
@@ -81,6 +81,19 @@ function ClientDetailContent() {
     mutationFn: async (noteId: number) =>
       (
         await api.clients[":id"].notes[":noteId"].resolve.$put({
+          param: { id, noteId: String(noteId) },
+        } as any)
+      ).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["client", id] });
+      qc.invalidateQueries({ queryKey: ["dashboard-alerts"] });
+    },
+  });
+
+  const unresolveNote = useMutation({
+    mutationFn: async (noteId: number) =>
+      (
+        await api.clients[":id"].notes[":noteId"].unresolve.$put({
           param: { id, noteId: String(noteId) },
         } as any)
       ).json(),
@@ -259,12 +272,21 @@ function ClientDetailContent() {
             </summary>
             <div className="space-y-2 mt-2">
               {resolvedNotes.map((n) => (
-                <div key={n.id} className="rounded-lg border border-border px-3 py-2 opacity-60">
-                  <p className="text-sm whitespace-pre-wrap line-through">{n.content}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {new Date(n.createdAt).toLocaleDateString("en-GB")}
-                    {n.resolvedAt && ` · tratada a ${new Date(n.resolvedAt).toLocaleDateString("en-GB")}`}
-                  </p>
+                <div key={n.id} className="flex items-start justify-between gap-3 rounded-lg border border-border px-3 py-2 opacity-60">
+                  <div className="min-w-0">
+                    <p className="text-sm whitespace-pre-wrap line-through">{n.content}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {new Date(n.createdAt).toLocaleDateString("en-GB")}
+                      {n.resolvedAt && ` · tratada a ${new Date(n.resolvedAt).toLocaleDateString("en-GB")}`}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => unresolveNote.mutate(n.id)}
+                    disabled={unresolveNote.isPending}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-brand-copper hover:underline shrink-0 disabled:opacity-50"
+                  >
+                    <Undo2 className="size-3.5" /> Reverter
+                  </button>
                 </div>
               ))}
             </div>
@@ -400,7 +422,6 @@ function ClientDetailContent() {
                 <th className="px-6 py-3 font-medium">Data</th>
                 <th className="px-4 py-3 font-medium">Hora</th>
                 <th className="px-4 py-3 font-medium">Serviço</th>
-                <th className="px-4 py-3 font-medium">Depósito</th>
                 <th className="px-4 py-3 font-medium">Estado</th>
               </tr>
             </thead>
@@ -410,9 +431,6 @@ function ClientDetailContent() {
                   <td className="px-6 py-3">{b.date}</td>
                   <td className="px-4 py-3">{b.startTime}</td>
                   <td className="px-4 py-3">{b.serviceName ?? "—"}</td>
-                  <td className="px-4 py-3">
-                    €{b.depositAmount.toFixed(2)} ({b.depositStatus})
-                  </td>
                   <td className="px-4 py-3">
                     <StatusPill status={b.status} />
                   </td>

@@ -95,6 +95,19 @@ export const clientsRoute = new Hono()
       .returning();
     return c.json({ note }, 200);
   })
+  .put("/:id/notes/:noteId/unresolve", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const noteId = Number(c.req.param("noteId"));
+    const [existing] = await db.select().from(clientNotes).where(eq(clientNotes.id, noteId));
+    if (!existing || existing.clientId !== id) return c.json({ message: "Not found" }, 404);
+
+    const [note] = await db
+      .update(clientNotes)
+      .set({ resolved: false, resolvedAt: null })
+      .where(eq(clientNotes.id, noteId))
+      .returning();
+    return c.json({ note }, 200);
+  })
   .delete("/:id/notes/:noteId", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
     const noteId = Number(c.req.param("noteId"));
