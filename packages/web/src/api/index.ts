@@ -20,6 +20,7 @@ import { refundsRoute } from "./routes/refunds";
 import { messagesRoute } from "./routes/messages";
 import { addressLookupRoute } from "./routes/address-lookup";
 import { smsRoute } from "./routes/sms";
+import { settingsRoute } from "./routes/settings";
 import { reportVoltWatchEvent } from "./services/volt-watch";
 
 const app = new Hono()
@@ -62,7 +63,8 @@ const app = new Hono()
   .route("/messages", messagesRoute)
   .route("/address-lookup", addressLookupRoute)
   .route("/google-calendar", googleCalendarRoute)
-  .route("/sms", smsRoute);
+  .route("/sms", smsRoute)
+  .route("/settings", settingsRoute);
 
 export type AppType = typeof app;
 export default app;

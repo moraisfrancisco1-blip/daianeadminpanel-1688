@@ -344,4 +344,22 @@ export const messageLog = sqliteTable("message_log", {
     .$defaultFn(() => new Date()),
 });
 
+// Single-row table (id always "primary") holding the editable company/invoice
+// details shown on invoice PDFs — overrides the hardcoded defaults in
+// api/lib/company.ts once the admin edits them from Settings.
+export const companySettings = sqliteTable("company_settings", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  address: text("address"),
+  zipCity: text("zip_city"),
+  kvk: text("kvk"),
+  vat: text("vat"),
+  iban: text("iban"),
+  phone: text("phone"),
+  paymentTermDays: integer("payment_term_days"),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export * from "./auth-schema";

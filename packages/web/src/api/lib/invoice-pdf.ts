@@ -1,5 +1,5 @@
 import PDFDocument from "pdfkit";
-import { COMPANY } from "./company";
+import { COMPANY, type CompanyInvoiceDetails } from "./company";
 import { Cinzel_B64, Cormorant_B64, CormorantItalic_B64, Jost_B64, Logo_B64 } from "./brand-assets";
 
 // Fonts and logo are embedded as base64 (see brand-assets.ts) instead of read from disk.
@@ -43,6 +43,7 @@ interface InvoicePdfData {
   vatBreakdown: { rate: number; base: number; vat: number }[];
   status?: string;
   paidAt?: Date | null;
+  company?: CompanyInvoiceDetails;
 }
 
 const TEAL = "#2E5252";
@@ -54,6 +55,7 @@ const TEXT_DARK = "#1F2B28";
 const TEXT_MUTED = "#6B6259";
 
 export function generateInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
+  const company = data.company ?? COMPANY;
   return new Promise((resolve, reject) => {
     // Omitting `font` skips PDFKit's eager load of the "Helvetica" standard font
     // at construction time (it only loads one when the option is truthy) — we
@@ -106,12 +108,12 @@ export function generateInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
       .fillColor(TEXT_DARK)
       .font(F_BODY)
       .fontSize(10)
-      .text(COMPANY.name, 40, y + 13, { width: 250 })
+      .text(company.name, 40, y + 13, { width: 250 })
       .fillColor(TEXT_MUTED)
       .fontSize(8.5)
-      .text(`${COMPANY.address}, ${COMPANY.zipCity}`, 40, y + 28, { width: 250 })
-      .text(`KVK ${COMPANY.kvk}  ·  VAT ${COMPANY.vat}`, 40, y + 40, { width: 250 })
-      .text(`IBAN ${COMPANY.iban}`, 40, y + 52, { width: 250 });
+      .text(`${company.address}, ${company.zipCity}`, 40, y + 28, { width: 250 })
+      .text(`KVK ${company.kvk}  ·  VAT ${company.vat}`, 40, y + 40, { width: 250 })
+      .text(`IBAN ${company.iban}`, 40, y + 52, { width: 250 });
 
     doc.fillColor(TEXT_MUTED).font(F_BODY).fontSize(8).text("BILL TO", 320, y, { width: 235, align: "right" });
     doc
@@ -213,7 +215,7 @@ export function generateInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
       .font(F_BODY)
       .fontSize(8)
       .text(
-        `Payment term: ${COMPANY.paymentTermDays} days · IBAN ${COMPANY.iban} · ${COMPANY.phone}`,
+        `Payment term: ${company.paymentTermDays} days · IBAN ${company.iban} · ${company.phone}`,
         0,
         800,
         { width: pageW, align: "center" },

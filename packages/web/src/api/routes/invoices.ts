@@ -9,7 +9,7 @@ import { generateInvoicePdf } from "../lib/invoice-pdf";
 import { buildInvoiceEmailHtml, buildPaymentLinkEmailHtml, buildAdminInvoicePaidHtml } from "../lib/email-templates";
 import { sendTrackedEmail } from "../services/email-log";
 import { changeInvoiceStatus, recordInvoiceActivity } from "../services/invoice-activity";
-import { COMPANY } from "../lib/company";
+import { COMPANY, getCompanyInvoiceDetails } from "../lib/company";
 import { stripe } from "../services/stripe";
 import { findStripeCustomerByEmail, createStripeCustomer, voidStripeInvoice, deleteStripeInvoice } from "../services/stripe-sync";
 
@@ -288,6 +288,7 @@ export const invoicesRoute = new Hono()
     const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
 
     const vatBreakdown = vatBreakdownFromNet(items);
+    const company = await getCompanyInvoiceDetails();
 
     const pdfBuffer = await generateInvoicePdf({
       invoiceNumber: invoice.invoiceNumber,
@@ -309,6 +310,7 @@ export const invoicesRoute = new Hono()
       vatBreakdown,
       status: invoice.status,
       paidAt: invoice.paidAt,
+      company,
     });
 
     c.header("Content-Type", "application/pdf");
@@ -325,6 +327,7 @@ export const invoicesRoute = new Hono()
     if (!client?.email) return c.json({ message: "Client has no email" }, 400);
 
     const vatBreakdown = vatBreakdownFromNet(items);
+    const company = await getCompanyInvoiceDetails();
 
     const pdfBuffer = await generateInvoicePdf({
       invoiceNumber: invoice.invoiceNumber,
@@ -339,6 +342,7 @@ export const invoicesRoute = new Hono()
       vatBreakdown,
       status: invoice.status,
       paidAt: invoice.paidAt,
+      company,
     });
 
     // "Send Invoice" = email the invoice document (PDF). No payment link is created here;

@@ -107,11 +107,13 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 function AvatarMenu({
   name,
   email,
+  image,
   roleLabel,
   size = "md",
 }: {
   name: string;
   email?: string | null;
+  image?: string | null;
   roleLabel: string;
   size?: "sm" | "md";
 }) {
@@ -138,11 +140,11 @@ function AvatarMenu({
       >
         <span
           className={cn(
-            "shrink-0 rounded-full bg-brand-teal text-brand-cream flex items-center justify-center font-display font-semibold ring-2 ring-brand-gold/70",
+            "shrink-0 rounded-full bg-brand-teal text-brand-cream flex items-center justify-center font-display font-semibold ring-2 ring-brand-gold/70 overflow-hidden",
             size === "sm" ? "size-8 text-xs" : "size-9 text-sm",
           )}
         >
-          {initialsOf(name)}
+          {image ? <img src={image} alt={name} className="w-full h-full object-cover" /> : initialsOf(name)}
         </span>
         {size === "md" && (
           <span className="hidden sm:block text-left leading-tight">
@@ -158,12 +160,20 @@ function AvatarMenu({
             <p className="text-sm font-medium truncate">{name}</p>
             {email && <p className="text-xs text-muted-foreground truncate">{email}</p>}
           </div>
-          <button className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors">
+          <Link
+            to="/profile"
+            onClick={() => setOpen(false)}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors"
+          >
             <User className="size-4" /> Profile
-          </button>
-          <button className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors">
+          </Link>
+          <Link
+            to="/settings"
+            onClick={() => setOpen(false)}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors"
+          >
             <Settings className="size-4" /> Settings
-          </button>
+          </Link>
           <div className="border-t border-border mt-1 pt-1">
             <button
               onClick={() => signOut().then(() => window.location.assign("/login"))}
@@ -244,6 +254,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   const { data: session } = useSession();
   const [mobileOpen, setMobileOpen] = useState(false);
   const name = session?.user?.name || "Daï Oakes";
+  const image = (session?.user as { image?: string | null } | undefined)?.image ?? null;
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -271,8 +282,8 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
             </nav>
             <div className="px-4 py-4 border-t border-brand-gold/25">
               <div className="flex items-center gap-2.5">
-                <span className="size-8 shrink-0 rounded-full bg-white/10 text-brand-cream flex items-center justify-center font-display font-semibold text-xs ring-2 ring-brand-gold/70">
-                  {initialsOf(name)}
+                <span className="size-8 shrink-0 rounded-full bg-white/10 text-brand-cream flex items-center justify-center font-display font-semibold text-xs ring-2 ring-brand-gold/70 overflow-hidden">
+                  {image ? <img src={image} alt={name} className="w-full h-full object-cover" /> : initialsOf(name)}
                 </span>
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-brand-cream truncate">{name}</p>
@@ -301,8 +312,8 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="px-4 py-4 border-t border-brand-gold/25">
           <div className="flex items-center gap-2.5">
-            <span className="size-9 shrink-0 rounded-full bg-white/10 text-brand-cream flex items-center justify-center font-display font-semibold text-sm ring-2 ring-brand-gold/70">
-              {initialsOf(name)}
+            <span className="size-9 shrink-0 rounded-full bg-white/10 text-brand-cream flex items-center justify-center font-display font-semibold text-sm ring-2 ring-brand-gold/70 overflow-hidden">
+              {image ? <img src={image} alt={name} className="w-full h-full object-cover" /> : initialsOf(name)}
             </span>
             <div className="min-w-0">
               <p className="text-sm font-medium text-brand-cream truncate">{name}</p>
@@ -336,7 +347,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
               />
             </div>
             <NotificationsMenu />
-            <AvatarMenu name={name} email={session?.user?.email} roleLabel="Admin" />
+            <AvatarMenu name={name} email={session?.user?.email} image={image} roleLabel="Admin" />
           </div>
         </div>
 

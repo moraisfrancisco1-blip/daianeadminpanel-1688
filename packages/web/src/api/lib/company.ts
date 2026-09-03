@@ -1,3 +1,7 @@
+import { db } from "../database";
+import { companySettings } from "../database/schema";
+import { eq } from "drizzle-orm";
+
 export const COMPANY = {
   name: "Daiane Oakes Body Therapist",
   kvk: "75105659",
@@ -22,6 +26,28 @@ export const COMPANY = {
   // Hours after the session start time before the review email goes out.
   postSessionEmailDelayHours: 3,
 };
+
+export type CompanyInvoiceDetails = Pick<
+  typeof COMPANY,
+  "name" | "address" | "zipCity" | "kvk" | "vat" | "iban" | "phone" | "paymentTermDays"
+>;
+
+// The invoice-facing subset of COMPANY, overridable from Settings. Falls back
+// to the hardcoded defaults above for any field never edited there.
+export async function getCompanyInvoiceDetails(): Promise<CompanyInvoiceDetails> {
+  const [row] = await db.select().from(companySettings).where(eq(companySettings.id, "primary"));
+  if (!row) return COMPANY;
+  return {
+    name: row.name ?? COMPANY.name,
+    address: row.address ?? COMPANY.address,
+    zipCity: row.zipCity ?? COMPANY.zipCity,
+    kvk: row.kvk ?? COMPANY.kvk,
+    vat: row.vat ?? COMPANY.vat,
+    iban: row.iban ?? COMPANY.iban,
+    phone: row.phone ?? COMPANY.phone,
+    paymentTermDays: row.paymentTermDays ?? COMPANY.paymentTermDays,
+  };
+}
 
 // Practice / studio address (matches daianeoakes.com) — used in all client-facing
 // emails, calendar events, and the booking page. Distinct from the KVK/invoice address.
