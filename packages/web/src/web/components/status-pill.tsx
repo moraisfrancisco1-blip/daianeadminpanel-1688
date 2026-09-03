@@ -26,7 +26,7 @@ const LABEL: Record<string, string> = {
   cancelled: "Cancelled",
   accepted: "Accepted",
   declined: "Declined",
-  pending_deposit: "Pending deposit",
+  pending_deposit: "Payment pending",
   confirmed: "Confirmed",
   no_show: "No-show",
   completed: "Completed",

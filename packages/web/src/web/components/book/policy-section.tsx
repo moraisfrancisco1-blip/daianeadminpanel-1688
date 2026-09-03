@@ -15,8 +15,8 @@ export function PolicySection() {
         />
         <PolicyCard
           icon={ShieldCheck}
-          title="Deposit Secures Your Slot"
-          desc="A €25 deposit (or full payment) confirms your booking. Late cancellations may forfeit it."
+          title="Payment Secures Your Slot"
+          desc="Full payment confirms your booking. Late cancellations may forfeit it."
         />
         <PolicyCard
           icon={Clock}

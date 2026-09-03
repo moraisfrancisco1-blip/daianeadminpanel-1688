@@ -24,17 +24,27 @@ type DaySchedule = {
   blocks: { startMin: number; endMin: number }[];
 };
 
-// Centralized per-day availability (Mon/Wed/Fri). Days not listed have no availability.
+// Centralized per-day availability (Mon/Wed/Fri = Rotterdam studio, Tue/Thu = Amsterdam-only).
 const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
   1: { // Monday — block 09:00–10:00
     startMin: 9 * 60,
     endMin: 18 * 60,
     blocks: [{ startMin: 9 * 60, endMin: 10 * 60 }],
   },
+  2: { // Tuesday (Amsterdam only)
+    startMin: 9 * 60,
+    endMin: 18 * 60,
+    blocks: [],
+  },
   3: { // Wednesday — block 09:00–11:00
     startMin: 9 * 60,
     endMin: 18 * 60,
     blocks: [{ startMin: 9 * 60, endMin: 11 * 60 }],
+  },
+  4: { // Thursday (Amsterdam only)
+    startMin: 9 * 60,
+    endMin: 18 * 60,
+    blocks: [],
   },
   5: { // Friday — starts 08:45, block 10:00–11:00
     startMin: 8 * 60 + 45,
@@ -43,17 +53,27 @@ const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
   },
 };
 
-function scheduleFor(dateStr: string): DaySchedule | null {
+// Tuesday/Thursday are reserved exclusively for Amsterdam-location sessions;
+// every other working day is Rotterdam-only.
+function locationForDay(day: number): "amsterdam" | "rotterdam" {
+  return day === 2 || day === 4 ? "amsterdam" : "rotterdam";
+}
+
+/** Returns the day's schedule, or null if it has no availability for the given location. */
+function scheduleFor(dateStr: string, location?: string): DaySchedule | null {
   const day = new Date(dateStr + "T00:00:00").getDay();
-  return WEEKLY_SCHEDULE[day] ?? null;
+  const schedule = WEEKLY_SCHEDULE[day] ?? null;
+  if (!schedule) return null;
+  if (location && locationForDay(day) !== location) return null;
+  return schedule;
 }
 
 function isBlockedBySchedule(schedule: DaySchedule, startMin: number, endMin: number): boolean {
   return schedule.blocks.some((b) => startMin < b.endMin && endMin > b.startMin);
 }
 
-async function isSlotAvailable(date: string, startTime: string, durationMinutes: number, excludeBookingId?: number): Promise<boolean> {
-  const schedule = scheduleFor(date);
+async function isSlotAvailable(date: string, startTime: string, durationMinutes: number, excludeBookingId?: number, location?: string): Promise<boolean> {
+  const schedule = scheduleFor(date, location);
   if (!schedule) return false;
   const start = timeToMinutes(startTime);
   const end = start + durationMinutes;
@@ -115,7 +135,10 @@ export const bookingsRoute = new Hono()
   .get("/availability", async (c) => {
     const date = c.req.query("date");
     if (!date) return c.json({ message: "date required (YYYY-MM-DD)" }, 400);
-    const schedule = scheduleFor(date);
+    // Public booking always sends a location; admin (manual booking) omits it to
+    // see every working day, since the admin can override the location split.
+    const location = c.req.query("location") || undefined;
+    const schedule = scheduleFor(date, location);
     if (!schedule) return c.json({ slots: [] }, 200);
 
     const [service] = c.req.query("serviceId")
@@ -175,12 +198,14 @@ export const bookingsRoute = new Hono()
     if (!body.date || !body.startTime) {
       return c.json({ message: "Date and time are required" }, 400);
     }
-    if (!(await isSlotAvailable(body.date, body.startTime, service.durationMinutes))) {
+    const location = body.location === "amsterdam" ? "amsterdam" : "rotterdam";
+    if (!(await isSlotAvailable(body.date, body.startTime, service.durationMinutes, undefined, location))) {
       return c.json({ message: "The selected time is not available" }, 409);
     }
 
-    const payFullNow = !!body.payFullNow;
-    const amountToCharge = payFullNow ? service.price : 25;
+    // Deposit-only bookings are disabled for now — every public booking pays in full.
+    const payFullNow = true;
+    const amountToCharge = service.price;
 
     // Free services (e.g. "Coffee & Talk") need no payment — confirm immediately.
     if (service.price === 0) {
@@ -193,6 +218,7 @@ export const bookingsRoute = new Hono()
           serviceId: body.serviceId,
           date: body.date,
           startTime: body.startTime,
+          location,
           status: "confirmed",
           depositAmount: 0,
           depositStatus: "paid",
@@ -267,8 +293,9 @@ export const bookingsRoute = new Hono()
         serviceId: body.serviceId,
         date: body.date,
         startTime: body.startTime,
+        location,
         status: "pending_deposit",
-        depositAmount: payFullNow ? service.price : 25,
+        depositAmount: amountToCharge,
         depositStatus: "unpaid",
         payFullNow,
         paymentMethod: body.paymentMethod ?? null,
@@ -417,6 +444,10 @@ export const bookingsRoute = new Hono()
       )[0];
     }
 
+    // Admin bookings aren't gated by location — it's recorded for reporting,
+    // derived from the day the admin picked (Tue/Thu = Amsterdam).
+    const location = locationForDay(new Date(`${body.date}T00:00:00`).getDay());
+
     const [booking] = await db
       .insert(bookings)
       .values({
@@ -427,6 +458,7 @@ export const bookingsRoute = new Hono()
         serviceId: body.serviceId,
         date: body.date,
         startTime: body.startTime,
+        location,
         status: "confirmed",
         depositAmount: body.depositAmount ?? 0,
         depositStatus: body.depositAmount ? "unpaid" : "paid",
@@ -596,6 +628,7 @@ export const bookingsRoute = new Hono()
         serviceId: service.id,
         date,
         startTime,
+        location: locationForDay(new Date(`${date}T00:00:00`).getDay()),
         notes: body.notes ?? existing.notes,
         status,
       })

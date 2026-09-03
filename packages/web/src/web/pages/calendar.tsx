@@ -43,15 +43,15 @@ const STATUS_STYLES: Record<string, string> = {
   confirmed: "bg-brand-teal text-white border-brand-teal",
   pending_deposit: "bg-brand-bronze text-white border-brand-bronze",
   completed: "bg-[#4C7A56] text-white border-[#4C7A56]",
-  cancelled: "bg-neutral-400 text-white border-neutral-400 line-through",
-  no_show: "bg-neutral-600 text-white border-neutral-600",
+  cancelled: "bg-neutral-400 text-white border-neutral-400",
+  no_show: "bg-neutral-400 text-white border-neutral-400",
 };
 
 const STATUS_LABEL: Record<string, string> = {
   confirmed: "Confirmado",
-  pending_deposit: "Depósito pendente",
+  pending_deposit: "Pagamento pendente",
   completed: "Concluído",
-  cancelled: "Cancelado",
+  cancelled: "Cancelada",
   no_show: "Não compareceu",
 };
 
@@ -85,6 +85,11 @@ function minToTime(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+// Tuesdays and Thursdays are reserved for Amsterdam-location sessions only.
+function isAmsterdamOnlyDay(day: Date): boolean {
+  const dow = day.getDay();
+  return dow === 2 || dow === 4;
 }
 
 export default function CalendarPage() {
@@ -354,10 +359,18 @@ function TimeGrid(props: {
           {days.map((day) => {
             const iso = toISODate(day);
             const isToday = iso === toISODate(new Date());
+            const amsterdamOnly = isAmsterdamOnlyDay(day);
             return (
-              <div key={iso} className={`flex-1 min-w-[90px] border-l border-b px-2 py-2 text-center ${isToday ? "bg-brand-cream" : ""}`}>
+              <div
+                key={iso}
+                className={`flex-1 min-w-[90px] border-l border-b px-2 py-2 text-center ${
+                  isToday ? "bg-brand-cream" : amsterdamOnly ? "bg-pink-100" : ""
+                }`}
+                title={amsterdamOnly ? "Só para clientes de Amsterdão" : undefined}
+              >
                 <p className="text-xs font-medium">{day.toLocaleDateString("en-GB", { weekday: "short" })}</p>
                 <p className={`text-lg font-display ${isToday ? "text-brand-copper" : ""}`}>{day.getDate()}</p>
+                {amsterdamOnly && <p className="text-[9px] text-pink-700 font-medium">Amsterdão</p>}
               </div>
             );
           })}
@@ -375,10 +388,11 @@ function TimeGrid(props: {
             const dayBookings = bookings.filter((b) => b.date === iso);
             const dayBlocked = blocked.filter((b) => b.date === iso);
             const weeklyBlocks = WEEKLY_BLOCKS[day.getDay()] ?? [];
+            const amsterdamOnly = isAmsterdamOnlyDay(day);
             return (
               <div
                 key={iso}
-                className="flex-1 min-w-[90px] border-l relative"
+                className={`flex-1 min-w-[90px] border-l relative ${amsterdamOnly ? "bg-pink-50" : ""}`}
                 style={{ height: HOURS.length * HOUR_HEIGHT }}
                 onDoubleClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
@@ -415,19 +429,35 @@ function TimeGrid(props: {
                 ))}
                 {dayBookings.map((b) => {
                   const dur = durationMap.get(b.serviceId ?? -1) ?? 60;
+                  const isCancelled = b.status === "cancelled";
+                  const isNoShow = b.status === "no_show";
                   const style = STATUS_STYLES[b.status] ?? "bg-neutral-500 text-white border-neutral-500";
                   return (
                     <button
                       key={b.id}
                       onClick={() => onSelectBooking(b)}
                       onDoubleClick={(e) => e.stopPropagation()}
-                      className={`absolute left-0.5 right-0.5 rounded border px-1.5 py-1 text-left overflow-hidden shadow-sm ${style}`}
+                      className="absolute left-0.5 right-0.5 rounded border overflow-hidden shadow-sm text-left"
                       style={{ top: top(b.startTime), height: height(dur) }}
                     >
-                      <p className="text-[11px] font-semibold truncate">
-                        {b.startTime} · {b.name}
-                      </p>
-                      {dur >= 45 && <p className="text-[10px] opacity-90 truncate">{b.serviceName}</p>}
+                      <div className={`absolute inset-0 ${style} ${isCancelled ? "opacity-40" : ""}`} />
+                      <div className="relative px-1.5 py-1">
+                        {isCancelled && <p className="text-[11px] font-bold text-red-600 truncate">Cancelada</p>}
+                        {isNoShow && <p className="text-[11px] font-bold text-amber-500 truncate">Não compareceu</p>}
+                        {(isCancelled || isNoShow) && (
+                          <p className="text-[10px] text-white/90 truncate">
+                            {b.startTime} · {b.name}
+                          </p>
+                        )}
+                        {!isCancelled && !isNoShow && (
+                          <>
+                            <p className="text-[11px] font-semibold truncate">
+                              {b.startTime} · {b.name}
+                            </p>
+                            {dur >= 45 && <p className="text-[10px] opacity-90 truncate">{b.serviceName}</p>}
+                          </>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
@@ -605,12 +635,6 @@ function BookingDetailModal(props: {
             <p className="text-xs text-muted-foreground">Estado</p>
             <p>{STATUS_LABEL[booking.status] ?? booking.status}</p>
           </div>
-          <div className="col-span-2">
-            <p className="text-xs text-muted-foreground">Depósito</p>
-            <p>
-              €{booking.depositAmount.toFixed(2)} ({booking.depositStatus})
-            </p>
-          </div>
         </div>
 
         <div className="border-t pt-4 space-y-3">
@@ -674,7 +698,7 @@ function BookingDetailModal(props: {
             className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
           >
             <option value="confirmed">Confirmado</option>
-            <option value="pending_deposit">Depósito pendente</option>
+            <option value="pending_deposit">Pagamento pendente</option>
             <option value="completed">Concluído</option>
             <option value="cancelled">Cancelado</option>
             <option value="no_show">Não compareceu</option>

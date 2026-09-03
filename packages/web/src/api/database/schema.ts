@@ -175,6 +175,7 @@ export const bookings = sqliteTable("bookings", {
   serviceId: integer("service_id").notNull(),
   date: text("date").notNull(), // YYYY-MM-DD
   startTime: text("start_time").notNull(), // HH:MM
+  location: text("location").notNull().default("rotterdam"), // rotterdam (Mon/Wed/Fri studio) | amsterdam (Tue/Thu only)
   status: text("status").notNull().default("pending_deposit"), // pending_deposit, confirmed, cancelled, completed, no_show
   depositAmount: real("deposit_amount").notNull().default(25),
   depositStatus: text("deposit_status").notNull().default("unpaid"), // unpaid, paid, refunded

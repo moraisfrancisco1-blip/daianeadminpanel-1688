@@ -44,7 +44,6 @@ function BookingManualContent() {
     serviceId: "",
     date: initialDate,
     startTime: initialTime,
-    depositAmount: "",
     paymentMethod: "",
     generateInvoice: true,
     notes: "",
@@ -96,7 +95,6 @@ function BookingManualContent() {
           serviceId: Number(data.serviceId),
           date: data.date,
           startTime: data.startTime,
-          depositAmount: data.depositAmount ? Number(data.depositAmount) : null,
           paymentMethod: data.paymentMethod || null,
           generateInvoice: data.generateInvoice,
           notes: data.notes || null,
@@ -122,7 +120,6 @@ function BookingManualContent() {
         serviceId: "",
         date: "",
         startTime: "",
-        depositAmount: "",
         paymentMethod: "",
         generateInvoice: true,
         notes: "",
@@ -405,22 +402,6 @@ function BookingManualContent() {
           </h2>
 
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1.5">Deposit Amount (€)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={formData.depositAmount}
-                onChange={(e) => setFormData({ ...formData, depositAmount: e.target.value })}
-                placeholder="0.00"
-                className="w-full px-4 py-2.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Leave empty for free services or if no deposit is required
-              </p>
-            </div>
-
             <div>
               <label className="block text-sm font-medium mb-1.5">Payment Method</label>
               <select

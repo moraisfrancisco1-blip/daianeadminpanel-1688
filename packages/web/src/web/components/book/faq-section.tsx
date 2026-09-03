@@ -12,7 +12,7 @@ const FAQS = [
   },
   {
     q: "Can I reschedule or cancel my booking?",
-    a: "Yes — please give at least 24 hours' notice by replying to your confirmation email or calling. Cancellations with less notice may forfeit the deposit. See our full cancellation policy below.",
+    a: "Yes — please give at least 24 hours' notice by replying to your confirmation email or calling. Cancellations with less notice may forfeit the session payment. See our full cancellation policy below.",
   },
   {
     q: "Do you accept insurance (verzekering)?",
@@ -24,7 +24,7 @@ const FAQS = [
   },
   {
     q: "What payment methods do you accept?",
-    a: "Card and iDEAL, securely processed at the time of booking. A €25 deposit secures your slot, or you can pay the full session upfront.",
+    a: "Card and iDEAL, securely processed at the time of booking. Full payment secures your slot.",
   },
 ];
 

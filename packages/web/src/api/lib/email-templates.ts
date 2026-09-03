@@ -67,22 +67,20 @@ export function buildBookingConfirmationHtml(opts: {
     : "✨ Your Appointment is Confirmed";
 
   const subtitle = isAlmostConfirmed
-    ? "Pay your deposit to secure your slot."
+    ? "Complete your payment to secure your slot."
     : "We're looking forward to welcoming you.";
 
   // Payment info
   let paymentInfo: string;
   if (isFree) {
     paymentInfo = `<span style="color:${TEAL};font-weight:600;">Free session — no payment required</span>`;
-  } else if (opts.depositStatus === "paid" && (opts.payFullNow || opts.depositAmount >= opts.servicePrice)) {
+  } else if (opts.depositStatus === "paid") {
     paymentInfo = `<span style="color:${TEAL};font-weight:600;">✅ Paid — €${opts.servicePrice.toFixed(2)}</span>`;
-  } else if (opts.depositStatus === "paid" && opts.depositAmount > 0) {
-    paymentInfo = `<span style="color:${TEAL};font-weight:600;">✅ Deposit paid — €${opts.depositAmount.toFixed(2)}</span><br/><span style="font-size:12px;color:#6B6259;">Remainder due at session</span>`;
   } else if (isAlmostConfirmed && opts.checkoutUrl) {
     paymentInfo = `
-      <span style="color:${COPPER};font-weight:600;">⏳ Deposit due — €25.00</span><br/>
-      <span style="font-size:12px;color:#6B6259;display:block;margin-top:8px;">To confirm your booking, please pay your €25 deposit here:</span>
-      <a href="${opts.checkoutUrl}" style="display:inline-block;margin-top:8px;background:${TEAL};color:${GOLD};text-decoration:none;font-weight:600;letter-spacing:.5px;padding:12px 24px;border-radius:6px;font-size:14px;">Pay deposit with iDEAL →</a>
+      <span style="color:${COPPER};font-weight:600;">⏳ Payment due — €${opts.servicePrice.toFixed(2)}</span><br/>
+      <span style="font-size:12px;color:#6B6259;display:block;margin-top:8px;">To confirm your booking, please complete your payment here:</span>
+      <a href="${opts.checkoutUrl}" style="display:inline-block;margin-top:8px;background:${TEAL};color:${GOLD};text-decoration:none;font-weight:600;letter-spacing:.5px;padding:12px 24px;border-radius:6px;font-size:14px;">Pay with card or iDEAL →</a>
     `;
   } else {
     paymentInfo = `<span style="color:${COPPER};font-weight:600;">⏳ To pay at session — €${opts.servicePrice.toFixed(2)}</span>`;
@@ -117,8 +115,8 @@ export function buildBookingConfirmationHtml(opts: {
       <p style="font-size:13px;font-weight:600;color:${TEAL};margin:0 0 10px;">Booking Policy</p>
       <p style="margin:0 0 6px;font-weight:600;">⏰ 24-Hour Notice</p>
       <p style="margin:0 0 14px;color:#6B6259;">Reschedule or cancel free of charge up to 24 hours before your session.</p>
-      <p style="margin:0 0 6px;font-weight:600;">💳 Deposit Secures Your Slot</p>
-      <p style="margin:0 0 14px;color:#6B6259;">A €25 deposit (or full payment) confirms your booking.<br/>Late cancellations or missed appointments may result in the deposit being forfeited.</p>
+      <p style="margin:0 0 6px;font-weight:600;">💳 Payment Secures Your Slot</p>
+      <p style="margin:0 0 14px;color:#6B6259;">Full payment confirms your booking.<br/>Late cancellations or missed appointments may result in the payment being forfeited.</p>
       <p style="margin:0 0 6px;font-weight:600;">🕙 Please Arrive on Time</p>
       <p style="margin:0;color:#6B6259;">Sessions begin and end on schedule out of respect for every woman's time — yours and the next client's.</p>
     </div>

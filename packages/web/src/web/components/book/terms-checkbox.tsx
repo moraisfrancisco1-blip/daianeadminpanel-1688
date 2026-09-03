@@ -5,7 +5,7 @@ const TERMS_TEXT = `By booking a session with Studio Daï Oakes you agree to the
 
 Booking & Cancellation Policy
 • Reschedule or cancel free of charge up to 24 hours before your session.
-• A deposit (or full payment) secures your slot — late cancellations or no-shows may forfeit it.
+• Full payment secures your slot — late cancellations or no-shows may forfeit it.
 • Please arrive 15 minutes before your scheduled time.
 
 Health & Responsibility
@@ -14,7 +14,7 @@ Health & Responsibility
 • Studio Daï Oakes is not liable for pre-existing conditions not disclosed prior to a session.
 
 Payments
-• Payments are processed securely via Stripe. Deposits and full payments are non-refundable in case of late cancellation (less than 24h notice) or no-show.
+• Payments are processed securely via Stripe. Payments are non-refundable in case of late cancellation (less than 24h notice) or no-show.
 
 Privacy
 • Your contact details are used only to manage your booking, invoicing, and studio communications — never shared with third parties.`;

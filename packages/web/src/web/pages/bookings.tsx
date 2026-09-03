@@ -116,7 +116,7 @@ function BookingsContent() {
         <div>
           <h1 className="font-display text-3xl font-semibold">Bookings</h1>
           <p className="text-muted-foreground mt-1">
-            Mon/Wed/Fri 10:00–18:00 · €25 deposit ·{" "}
+            Mon/Wed/Fri · Rotterdam · Tue/Thu · Amsterdam ·{" "}
             <Link to="/book" className="text-primary underline">
               public booking page
             </Link>
@@ -138,7 +138,7 @@ function BookingsContent() {
           onChange={setStatusFilter}
           options={[
             { value: "all", label: "All" },
-            { value: "pending_deposit", label: "Pending deposit" },
+            { value: "pending_deposit", label: "Payment pending" },
             { value: "confirmed", label: "Confirmed" },
             { value: "completed", label: "Completed" },
             { value: "no_show", label: "No-show" },
@@ -163,7 +163,6 @@ function BookingsContent() {
                 <SortableTh label="Service" active={sortKey === "service"} dir={sortDir} onClick={() => toggle("service")} />
                 <SortableTh label="Date" active={sortKey === "date"} dir={sortDir} onClick={() => toggle("date")} />
                 <th className="px-4 py-3 font-medium">Time</th>
-                <th className="px-4 py-3 font-medium">Deposit</th>
                 <SortableTh label="Status" active={sortKey === "status"} dir={sortDir} onClick={() => toggle("status")} />
                 <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
@@ -207,10 +206,6 @@ function BookingsContent() {
                         <CheckCircle2 className="size-3.5" /> Paid
                       </span>
                     )}
-                  </td>
-                  <td className="px-4 py-3">
-                    €{b.depositAmount.toFixed(2)}{" "}
-                    <span className="text-xs text-muted-foreground">({b.depositStatus})</span>
                   </td>
                   <td className="px-4 py-3">
                     <StatusPill status={b.status} />
