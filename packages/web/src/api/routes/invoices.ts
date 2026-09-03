@@ -441,12 +441,22 @@ export const invoicesRoute = new Hono()
     const [prevInvoice] = await db.select().from(invoices).where(eq(invoices.id, id));
     const { lineItems, subtotal, vatTotal, total } = computeTotals(body.items);
 
+    // Repurposing a cancelled invoice's number for a different client (common
+    // practice to avoid gaps in the numbering for the accountant) must reset
+    // it to a clean draft — otherwise it stays "cancelled" forever and drags
+    // along the old client's Stripe/payment history, which no longer applies.
+    const isRepurposedCancelled =
+      !!prevInvoice &&
+      prevInvoice.status === "cancelled" &&
+      body.clientId != null &&
+      Number(body.clientId) !== prevInvoice.clientId;
+
     const [invoice] = await db
       .update(invoices)
       .set({
         invoiceNumber: body.invoiceNumber,
         clientId: body.clientId,
-        status: body.status,
+        status: isRepurposedCancelled ? "draft" : body.status,
         issueDate: body.issueDate ? new Date(body.issueDate) : undefined,
         dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
         notes: body.notes ?? null,
@@ -454,6 +464,19 @@ export const invoicesRoute = new Hono()
         vatTotal,
         total,
         paidAt: body.status === "paid" ? (body.paidAt ? new Date(body.paidAt) : new Date()) : null,
+        ...(isRepurposedCancelled
+          ? {
+              bookingId: null,
+              lastReminderAt: null,
+              reminderCount: 0,
+              stripeInvoiceId: null,
+              stripePaymentIntentId: null,
+              stripeCheckoutSessionId: null,
+              stripeCheckoutStatus: null,
+              stripePaymentIntentStatus: null,
+              lastStripeVerifiedAt: null,
+            }
+          : {}),
       })
       .where(eq(invoices.id, id))
       .returning();
@@ -474,14 +497,26 @@ export const invoicesRoute = new Hono()
       });
     }
 
-    await recordInvoiceActivity({
-      invoiceId: id,
-      type: prevInvoice && prevInvoice.status !== body.status ? "status_changed" : "edited",
-      oldStatus: prevInvoice?.status ?? null,
-      newStatus: body.status,
-      channel: "admin",
-      amount: total,
-    });
+    if (isRepurposedCancelled) {
+      await recordInvoiceActivity({
+        invoiceId: id,
+        type: "status_changed",
+        oldStatus: "cancelled",
+        newStatus: "draft",
+        channel: "admin",
+        amount: total,
+        metadata: { reason: "repurposed_for_new_client", previousClientId: prevInvoice!.clientId },
+      });
+    } else {
+      await recordInvoiceActivity({
+        invoiceId: id,
+        type: prevInvoice && prevInvoice.status !== body.status ? "status_changed" : "edited",
+        oldStatus: prevInvoice?.status ?? null,
+        newStatus: body.status,
+        channel: "admin",
+        amount: total,
+      });
+    }
 
     return c.json({ invoice }, 200);
   })
