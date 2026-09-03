@@ -4,12 +4,15 @@ export interface ServiceForDescription {
   durationMinutes?: number | null;
 }
 
-// For Deep CORE Somatic Mobility services, invoices must show the clinical
-// description ("NN' Deep CORE Somatic Mobility") rather than the internal
-// catalog name ("Daï Massage — NN min") — required for the 9% VAT filing.
+export const DCS_LABEL = "Deep CORE Somatic Mobility";
+
+// The word "massage" must never appear on an invoice — any service that is (or
+// is tagged as) a Daï Massage / Deep CORE Somatic Mobility session shows this
+// fixed clinical label instead of the internal catalog name, regardless of what
+// the catalog service happens to be named — required for the 9% VAT filing.
 export function invoiceDescriptionForService(svc: ServiceForDescription): string {
-  const isDcs = !!svc.description && /deep core somatic/i.test(svc.description);
+  const isDcs = /massage/i.test(svc.name) || (!!svc.description && /deep core somatic/i.test(svc.description));
   if (!isDcs) return svc.name;
   const durationPrefix = svc.durationMinutes ? `${svc.durationMinutes}' ` : "";
-  return `${durationPrefix}${svc.description}`;
+  return `${durationPrefix}${DCS_LABEL}`;
 }
