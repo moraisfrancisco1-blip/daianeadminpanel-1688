@@ -7,7 +7,7 @@ import { stripe } from "../services/stripe";
 import { sendTrackedEmail } from "../services/email-log";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildRemainderPaymentEmailHtml } from "../lib/email-templates";
 import { nextNumber } from "../lib/counters";
-import { computeVat } from "../lib/totals";
+import { computeVat, computeTotals, type LineInput } from "../lib/totals";
 import { invoiceDescriptionForService } from "../lib/invoice-description";
 import { COMPANY } from "../lib/company";
 import { changeInvoiceStatus } from "../services/invoice-activity";
@@ -472,16 +472,47 @@ export const bookingsRoute = new Hono()
     const isFullPayment = booking!.depositAmount >= service.price;
 
     // Create an Admin invoice for the amount the client still owes
-    // (service price minus any deposit already accounted for) — unless the
+    // (service price minus any deposit already accounted for, plus an
+    // optional travel/home-visit charge with its own VAT rate) — unless the
     // admin explicitly opted out (e.g. cash payment handled outside the app).
     // No Stripe Checkout Session is created here — the admin sends the payment
     // link later from the invoice or the booking detail.
     const deposit = booking!.depositAmount || 0;
-    const pendingAmount = Number((service.price - deposit).toFixed(2));
+    const servicePending = Number((service.price - deposit).toFixed(2));
     const generateInvoice = body.generateInvoice !== false;
-    if (pendingAmount > 0 && generateInvoice) {
-      const vatRate = service.vatRate;
-      const { net, vat } = computeVat(pendingAmount, vatRate);
+
+    const lineInputs: LineInput[] = [];
+    if (servicePending > 0) {
+      lineInputs.push({
+        description: invoiceDescriptionForService(service),
+        serviceId: service.id,
+        quantity: 1,
+        unitPrice: servicePending,
+        vatRate: service.vatRate,
+      });
+    }
+
+    // Travel / home-visit charge — filled in per booking since the distance
+    // and time depend on the client's address, not the catalog service.
+    const travelPrice = Number(body.travelPrice) || 0;
+    if (travelPrice > 0) {
+      const travelVatRate = body.travelVatRate != null ? Number(body.travelVatRate) : service.vatRate;
+      const travelDetail = [
+        body.travelKm ? `${body.travelKm} km` : null,
+        body.travelTimeMinutes ? `${body.travelTimeMinutes} min` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      lineInputs.push({
+        description: `Travel${travelDetail ? ` — ${travelDetail}` : ""}`,
+        quantity: 1,
+        unitPrice: travelPrice,
+        vatRate: travelVatRate,
+      });
+    }
+
+    if (lineInputs.length > 0 && generateInvoice) {
+      const { lineItems, subtotal, vatTotal, total } = computeTotals(lineInputs);
       const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
       const issueDate = new Date();
       const dueDate = new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
@@ -498,21 +529,23 @@ export const bookingsRoute = new Hono()
           status: "draft",
           issueDate,
           dueDate,
-          subtotal: net,
-          vatTotal: vat,
-          total: pendingAmount,
+          subtotal,
+          vatTotal,
+          total,
         })
         .returning();
 
-      await db.insert(invoiceItems).values({
-        invoiceId: invoice!.id,
-        serviceId: service.id,
-        description: invoiceDescriptionForService(service),
-        quantity: 1,
-        unitPrice: net,
-        vatRate,
-        amount: net,
-      });
+      for (const item of lineItems) {
+        await db.insert(invoiceItems).values({
+          invoiceId: invoice!.id,
+          serviceId: item.serviceId ?? null,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          vatRate: item.vatRate,
+          amount: item.amount,
+        });
+      }
 
       await db.update(bookings).set({ invoiceId: invoice!.id }).where(eq(bookings.id, booking!.id));
     }

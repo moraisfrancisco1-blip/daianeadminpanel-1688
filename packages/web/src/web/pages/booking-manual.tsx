@@ -4,7 +4,7 @@ import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { normalize, idFromQuery } from "../lib/list";
 import { Link, useLocation } from "wouter";
-import { ArrowLeft, Loader2, Calendar, Clock, User, Mail, Phone, FileText, Search, UserPlus, AlertTriangle, X } from "lucide-react";
+import { ArrowLeft, Loader2, Calendar, Clock, User, Mail, Phone, FileText, Search, UserPlus, AlertTriangle, X, Car } from "lucide-react";
 
 type ClientSuggestion = { id: number; name: string; email: string | null; phone: string | null };
 
@@ -47,7 +47,12 @@ function BookingManualContent() {
     paymentMethod: "",
     generateInvoice: true,
     notes: "",
+    travelPrice: "",
+    travelKm: "",
+    travelTimeMinutes: "",
+    travelVatRate: "0.09",
   });
+  const [showTravel, setShowTravel] = useState(false);
 
   // Fetch services
   const services = useQuery({
@@ -70,6 +75,7 @@ function BookingManualContent() {
       if (searchId !== null && c.id === searchId) return true;
       return normalize([c.name, c.email, c.phone].filter(Boolean).join(" ")).includes(searchQ);
     })
+    .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, 8);
   const showDropdown = search.trim().length > 0;
 
@@ -98,6 +104,10 @@ function BookingManualContent() {
           paymentMethod: data.paymentMethod || null,
           generateInvoice: data.generateInvoice,
           notes: data.notes || null,
+          travelPrice: data.travelPrice ? Number(data.travelPrice) : undefined,
+          travelKm: data.travelKm ? Number(data.travelKm) : undefined,
+          travelTimeMinutes: data.travelTimeMinutes ? Number(data.travelTimeMinutes) : undefined,
+          travelVatRate: data.travelPrice ? Number(data.travelVatRate) : undefined,
         },
       });
       const json = await response.json();
@@ -123,7 +133,12 @@ function BookingManualContent() {
         paymentMethod: "",
         generateInvoice: true,
         notes: "",
+        travelPrice: "",
+        travelKm: "",
+        travelTimeMinutes: "",
+        travelVatRate: "0.09",
       });
+      setShowTravel(false);
       // Return to the Agenda (same week/date) when the form was opened from a double-click.
       if (initialDate) {
         const createdDate = (data as any)?.booking?.date || initialDate;
@@ -436,6 +451,73 @@ function BookingManualContent() {
                   </span>
                 </span>
               </label>
+            </div>
+
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowTravel((v) => !v)}
+                className="flex items-center gap-2 text-sm font-medium text-brand-copper"
+              >
+                <Car className="size-4" /> {showTravel ? "Remove travel / home-visit charge" : "Add travel / home-visit charge"}
+              </button>
+              {showTravel && (
+                <div className="mt-3 p-4 rounded-lg border border-border bg-muted/30 space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Added as a separate invoice line, with its own VAT rate — fill in what applies for this session.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">Travel price (€)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.travelPrice}
+                        onChange={(e) => setFormData({ ...formData, travelPrice: e.target.value })}
+                        placeholder="0.00"
+                        className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">VAT rate</label>
+                      <select
+                        value={formData.travelVatRate}
+                        onChange={(e) => setFormData({ ...formData, travelVatRate: e.target.value })}
+                        className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      >
+                        <option value="0.21">21%</option>
+                        <option value="0.09">9%</option>
+                        <option value="0">0%</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">Distance (km)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={formData.travelKm}
+                        onChange={(e) => setFormData({ ...formData, travelKm: e.target.value })}
+                        placeholder="0"
+                        className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">Travel time (min)</label>
+                      <input
+                        type="number"
+                        step="1"
+                        min="0"
+                        value={formData.travelTimeMinutes}
+                        onChange={(e) => setFormData({ ...formData, travelTimeMinutes: e.target.value })}
+                        placeholder="0"
+                        className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
