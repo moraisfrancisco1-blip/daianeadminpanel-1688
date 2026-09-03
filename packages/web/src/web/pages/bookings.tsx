@@ -183,7 +183,7 @@ function BookingsContent() {
                     <div className="text-xs text-muted-foreground">{b.email}</div>
                   </td>
                   <td className="px-4 py-3">{b.serviceName ?? "—"}</td>
-                  <td className="px-4 py-3">{b.date}</td>
+                  <td className="px-4 py-3">{new Date(`${b.date}T00:00:00`).toLocaleDateString("en-GB")}</td>
                   <td className="px-4 py-3">
                     {b.startTime}
                     {b.invoiceId && b.invoiceStatus !== "paid" && b.invoiceStatus !== "cancelled" && (

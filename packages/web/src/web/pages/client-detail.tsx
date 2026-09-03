@@ -307,7 +307,7 @@ function ClientDetailContent() {
                 <div key={b.id} className="flex items-center justify-between text-sm">
                   <div>
                     <p className="font-medium">
-                      {b.date} · {b.startTime}
+                      {new Date(`${b.date}T00:00:00`).toLocaleDateString("en-GB")} · {b.startTime}
                     </p>
                     <p className="text-xs text-muted-foreground">{b.serviceName ?? "—"}</p>
                   </div>
@@ -428,7 +428,7 @@ function ClientDetailContent() {
             <tbody>
               {bookings.map((b) => (
                 <tr key={b.id} className="border-t border-border">
-                  <td className="px-6 py-3">{b.date}</td>
+                  <td className="px-6 py-3">{new Date(`${b.date}T00:00:00`).toLocaleDateString("en-GB")}</td>
                   <td className="px-4 py-3">{b.startTime}</td>
                   <td className="px-4 py-3">{b.serviceName ?? "—"}</td>
                   <td className="px-4 py-3">
