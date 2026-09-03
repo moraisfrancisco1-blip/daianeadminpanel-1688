@@ -72,7 +72,9 @@ function CatalogContent() {
         </div>
       ) : (
         <div className="grid md:grid-cols-2 gap-4">
-          {(services.data?.services ?? []).map((s: any) => (
+          {[...(services.data?.services ?? [])]
+            .sort((a: any, b: any) => a.name.localeCompare(b.name))
+            .map((s: any) => (
             <div key={s.id} className={`bg-card border border-border rounded-xl p-5 flex items-start justify-between ${!s.active ? "opacity-50" : ""}`}>
               <div>
                 <h3 className="font-medium">{s.name}</h3>

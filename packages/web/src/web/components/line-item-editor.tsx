@@ -26,6 +26,8 @@ export function LineItemEditor({
     durationMinutes?: number;
   }[];
 }) {
+  const sortedServices = [...services].sort((a, b) => a.name.localeCompare(b.name));
+
   function update(i: number, patch: Partial<LineItemDraft>) {
     const next = [...items];
     next[i] = { ...next[i]!, ...patch };
@@ -59,7 +61,7 @@ export function LineItemEditor({
             onChange={(e) => applyService(i, Number(e.target.value))}
           >
             <option value="">Custom</option>
-            {services.map((s) => (
+            {sortedServices.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>

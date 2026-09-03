@@ -336,11 +336,13 @@ function BookingManualContent() {
                 required
               >
                 <option value="">Select a service</option>
-                {services.data?.services?.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} — €{s.price.toFixed(2)} ({s.durationMinutes} min)
-                  </option>
-                ))}
+                {[...(services.data?.services ?? [])]
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} — €{s.price.toFixed(2)} ({s.durationMinutes} min)
+                    </option>
+                  ))}
               </select>
             </div>
 

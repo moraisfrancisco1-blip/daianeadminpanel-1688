@@ -1,3 +1,5 @@
+import { Fragment, type ReactNode } from "react";
+
 interface Service {
   id: number;
   name: string;
@@ -27,44 +29,50 @@ export function ServiceSelector({
     }
   }
 
-  return (
-    <div className="space-y-3">
-      {Array.from(groups.entries()).map(([label, variants]) => {
-        const selected = variants.find((v) => v.id === selectedId);
-        return (
-          <div
-            key={label}
-            className={`rounded-lg border p-4 transition-colors ${
-              selected ? "border-brand-copper bg-brand-copper/5" : "border-brand-tan/25 bg-white"
-            }`}
-          >
-            <p className="font-display text-sm text-brand-teal mb-1">{label}</p>
-            <p className="text-xs text-muted-foreground leading-relaxed mb-3">{variants[0]?.description}</p>
-            <div className="flex flex-wrap gap-2">
-              {variants
-                .sort((a, b) => a.durationMinutes - b.durationMinutes)
-                .map((v) => (
-                  <button
-                    key={v.id}
-                    type="button"
-                    onClick={() => onSelect(v.id)}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
-                      selectedId === v.id
-                        ? "bg-brand-copper text-white border-brand-copper"
-                        : "border-brand-tan/40 bg-background hover:border-brand-copper"
-                    }`}
-                  >
-                    {v.durationMinutes} min — €{v.price.toFixed(0)}
-                  </button>
-                ))}
-            </div>
-          </div>
-        );
-      })}
+  const entries: { key: string; label: string; node: ReactNode }[] = [];
 
-      {standalone.map((s) => (
+  for (const [label, variants] of groups.entries()) {
+    const selected = variants.find((v) => v.id === selectedId);
+    entries.push({
+      key: label,
+      label,
+      node: (
+        <div
+          className={`rounded-lg border p-4 transition-colors ${
+            selected ? "border-brand-copper bg-brand-copper/5" : "border-brand-tan/25 bg-white"
+          }`}
+        >
+          <p className="font-display text-sm text-brand-teal mb-1">{label}</p>
+          <p className="text-xs text-muted-foreground leading-relaxed mb-3">{variants[0]?.description}</p>
+          <div className="flex flex-wrap gap-2">
+            {variants
+              .sort((a, b) => a.durationMinutes - b.durationMinutes)
+              .map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => onSelect(v.id)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
+                    selectedId === v.id
+                      ? "bg-brand-copper text-white border-brand-copper"
+                      : "border-brand-tan/40 bg-background hover:border-brand-copper"
+                  }`}
+                >
+                  {v.durationMinutes} min — €{v.price.toFixed(0)}
+                </button>
+              ))}
+          </div>
+        </div>
+      ),
+    });
+  }
+
+  for (const s of standalone) {
+    entries.push({
+      key: String(s.id),
+      label: s.name,
+      node: (
         <button
-          key={s.id}
           type="button"
           onClick={() => onSelect(s.id)}
           className={`w-full text-left rounded-lg border p-4 transition-colors ${
@@ -82,6 +90,16 @@ export function ServiceSelector({
             </div>
           </div>
         </button>
+      ),
+    });
+  }
+
+  entries.sort((a, b) => a.label.localeCompare(b.label));
+
+  return (
+    <div className="space-y-3">
+      {entries.map((e) => (
+        <Fragment key={e.key}>{e.node}</Fragment>
       ))}
     </div>
   );
