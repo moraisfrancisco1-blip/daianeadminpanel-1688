@@ -1,4 +1,5 @@
 ﻿import { useState } from "react";
+import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
@@ -102,6 +103,7 @@ function InvoicesContent() {
   const [editId, setEditId] = useState<number | null>(null);
   const [clientId, setClientId] = useState<number | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [issueDate, setIssueDate] = useState("");
   const [isTest, setIsTest] = useState(false);
   const [items, setItems] = useState<LineItemDraft[]>([{ description: "", quantity: 1, unitPrice: 0, vatRate: 0.09 }]);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -177,14 +179,25 @@ function InvoicesContent() {
 
   const createInvoice = useMutation({
     mutationFn: async () => {
-      const res = await api.invoices.$post({ json: { clientId, items, isTest } });
-      return await res.json();
+      const res = await api.invoices.$post({
+        json: {
+          clientId,
+          items,
+          isTest,
+          invoiceNumber: invoiceNumber || undefined,
+          issueDate: issueDate || undefined,
+        } as any,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to create invoice.");
+      return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["invoices"] });
       setShowForm(false);
       resetForm();
     },
+    onError: (err: any) => showToast("error", err?.message ?? "Failed to create invoice."),
   });
 
   const updateInvoice = useMutation({
@@ -195,6 +208,7 @@ function InvoicesContent() {
         body: JSON.stringify({
           clientId,
           invoiceNumber: invoiceNumber || undefined,
+          issueDate: issueDate || undefined,
           items,
           status: undefined, // keep existing
         }),
@@ -303,6 +317,7 @@ function InvoicesContent() {
   function resetForm() {
     setClientId(null);
     setInvoiceNumber("");
+    setIssueDate("");
     setIsTest(false);
     setItems([{ description: "", quantity: 1, unitPrice: 0, vatRate: 0.09 }]);
   }
@@ -321,6 +336,7 @@ function InvoicesContent() {
       setEditId(inv.id);
       setClientId(data.invoice.clientId);
       setInvoiceNumber(data.invoice.invoiceNumber);
+      setIssueDate(new Date(data.invoice.issueDate).toISOString().slice(0, 10));
       setItems(
         (data.items ?? []).map((i: any) => ({
           description: i.description,
@@ -428,7 +444,15 @@ function InvoicesContent() {
                       <span className="ml-2 inline-block text-[10px] bg-amber-500 text-white rounded px-1 align-middle">TEST</span>
                     )}
                   </td>
-                  <td className="px-4 py-3">{inv.clientName ?? "—"}</td>
+                  <td className="px-4 py-3">
+                    {inv.clientName ? (
+                      <Link to={`/clients/${inv.clientId}`} className="hover:underline hover:text-brand-copper">
+                        {inv.clientName}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {new Date(inv.issueDate).toLocaleDateString("en-GB")}
                   </td>
@@ -539,14 +563,23 @@ function InvoicesContent() {
               {isEditing ? "Edit invoice" : "New invoice"}
             </h2>
             
-            <input
-              type="text"
-              placeholder="Invoice number (e.g. 2026-0141)"
-              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-              value={invoiceNumber}
-              onChange={(e) => setInvoiceNumber(e.target.value)}
-            />
-            
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="text"
+                placeholder={isEditing ? "Invoice number" : "Invoice number (auto if empty)"}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                value={invoiceNumber}
+                onChange={(e) => setInvoiceNumber(e.target.value)}
+              />
+              <input
+                type="date"
+                title="Issue date"
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                value={issueDate}
+                onChange={(e) => setIssueDate(e.target.value)}
+              />
+            </div>
+
             <select
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
               value={clientId ?? ""}

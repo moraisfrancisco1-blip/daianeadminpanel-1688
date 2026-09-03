@@ -147,10 +147,17 @@ export const invoicesRoute = new Hono()
     const body = await c.req.json();
     const { lineItems, subtotal, vatTotal, total } = computeTotals(body.items);
     const isTest = !!body.isTest;
-    const invoiceNumber = isTest
-      ? await nextTestNumber()
-      : await nextNumber("invoice", new Date().getFullYear());
-    const issueDate = new Date();
+
+    let invoiceNumber: string;
+    if (body.invoiceNumber) {
+      const [existing] = await db.select().from(invoices).where(eq(invoices.invoiceNumber, body.invoiceNumber));
+      if (existing) return c.json({ message: `Invoice number ${body.invoiceNumber} is already in use` }, 400);
+      invoiceNumber = body.invoiceNumber;
+    } else {
+      invoiceNumber = isTest ? await nextTestNumber() : await nextNumber("invoice", new Date().getFullYear());
+    }
+
+    const issueDate = body.issueDate ? new Date(body.issueDate) : new Date();
     const dueDate = body.dueDate
       ? new Date(body.dueDate)
       : new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
