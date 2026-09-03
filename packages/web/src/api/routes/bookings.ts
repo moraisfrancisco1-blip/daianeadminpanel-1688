@@ -661,6 +661,64 @@ export const bookingsRoute = new Hono()
 
     return c.json({ booking }, 200);
   })
+  // Admin: generate an invoice for a booking that doesn't have one yet (draft, full amount).
+  .post("/:id/generate-invoice", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, id));
+    if (!booking) return c.json({ message: "Booking not found" }, 404);
+    if (booking.invoiceId) return c.json({ message: "This booking already has an invoice" }, 400);
+
+    let clientId = booking.clientId;
+    if (!clientId) {
+      let [client] = await db.select().from(clients).where(eq(clients.email, booking.email));
+      if (!client) {
+        [client] = await db
+          .insert(clients)
+          .values({ name: booking.name, email: booking.email, phone: booking.phone })
+          .returning();
+      }
+      clientId = client!.id;
+      await db.update(bookings).set({ clientId }).where(eq(bookings.id, id));
+    }
+
+    const [service] = await db.select().from(services).where(eq(services.id, booking.serviceId));
+    if (!service) return c.json({ message: "Service not found" }, 404);
+
+    const vatRate = service.vatRate;
+    const { net, vat } = computeVat(service.price, vatRate);
+    const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
+    const issueDate = new Date();
+    const dueDate = new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+    const [invoice] = await db
+      .insert(invoices)
+      .values({
+        invoiceNumber,
+        clientId,
+        bookingId: booking.id,
+        status: "draft",
+        issueDate,
+        dueDate,
+        subtotal: net,
+        vatTotal: vat,
+        total: service.price,
+      })
+      .returning();
+
+    await db.insert(invoiceItems).values({
+      invoiceId: invoice!.id,
+      serviceId: service.id,
+      description: invoiceDescriptionForService(service),
+      quantity: 1,
+      unitPrice: net,
+      vatRate,
+      amount: net,
+    });
+
+    await db.update(bookings).set({ invoiceId: invoice!.id }).where(eq(bookings.id, id));
+
+    return c.json({ invoice }, 201);
+  })
   // Admin: send remainder payment email (10 min before session ends)
   .post("/:id/send-remainder-email", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));

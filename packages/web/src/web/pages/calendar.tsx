@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Link, useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText } from "lucide-react";
 
 const FAR_DATE_WARNING_DAYS = 15;
 
@@ -17,6 +17,7 @@ function daysFromToday(dateStr: string): number {
 
 type BookingItem = {
   id: number;
+  clientId: number | null;
   name: string;
   email: string;
   phone: string | null;
@@ -40,9 +41,9 @@ const HOUR_HEIGHT = 56;
 const HOURS = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i);
 
 const STATUS_STYLES: Record<string, string> = {
-  confirmed: "bg-brand-teal text-white border-brand-teal",
+  confirmed: "bg-emerald-100 text-emerald-900 border-emerald-300",
   pending_deposit: "bg-brand-bronze text-white border-brand-bronze",
-  completed: "bg-[#4C7A56] text-white border-[#4C7A56]",
+  completed: "bg-emerald-200 text-emerald-900 border-emerald-400",
   cancelled: "bg-neutral-400 text-white border-neutral-400",
   no_show: "bg-neutral-400 text-white border-neutral-400",
 };
@@ -545,13 +546,34 @@ function BookingDetailModal(props: {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [sendInvoiceLoading, setSendInvoiceLoading] = useState(false);
   const [sendInvoiceMsg, setSendInvoiceMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [generatedInvoice, setGeneratedInvoice] = useState<{ id: number; invoiceNumber: string; status: string; total: number } | null>(
+    null,
+  );
+  const [generateInvoiceLoading, setGenerateInvoiceLoading] = useState(false);
+  const [generateInvoiceError, setGenerateInvoiceError] = useState<string | null>(null);
+  const effectiveInvoiceId = booking.invoiceId ?? generatedInvoice?.id ?? null;
+
+  async function generateInvoice() {
+    setGenerateInvoiceLoading(true);
+    setGenerateInvoiceError(null);
+    try {
+      const res = await fetch(`/api/bookings/${booking.id}/generate-invoice`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to generate invoice");
+      setGeneratedInvoice(data.invoice);
+    } catch (e: any) {
+      setGenerateInvoiceError(e?.message ?? "Failed to generate invoice.");
+    } finally {
+      setGenerateInvoiceLoading(false);
+    }
+  }
 
   async function sendInvoiceEmail() {
-    if (!booking.invoiceId) return;
+    if (!effectiveInvoiceId) return;
     setSendInvoiceLoading(true);
     setSendInvoiceMsg(null);
     try {
-      const res = await fetch(`/api/invoices/${booking.invoiceId}/send`, { method: "POST" });
+      const res = await fetch(`/api/invoices/${effectiveInvoiceId}/send`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to send invoice");
       setSendInvoiceMsg({ ok: true, text: "Invoice emailed to the client." });
@@ -573,14 +595,15 @@ function BookingDetailModal(props: {
     },
     enabled: !!booking.invoiceId,
   });
+  const effectiveInvoice = invoiceQ.data ?? generatedInvoice;
 
   async function requestPaymentLink() {
-    if (!booking.invoiceId) return;
+    if (!effectiveInvoiceId) return;
     setCheckoutUrl(null);
     setCheckoutLoading(true);
     setPaymentLinkOpen(true);
     try {
-      const res = await fetch(`/api/invoices/${booking.invoiceId}/checkout`, { method: "POST" });
+      const res = await fetch(`/api/invoices/${effectiveInvoiceId}/checkout`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to create payment link");
       setCheckoutUrl((data as { checkoutUrl?: string })?.checkoutUrl ?? null);
@@ -592,9 +615,9 @@ function BookingDetailModal(props: {
   }
 
   async function emailPaymentLink() {
-    if (!booking.invoiceId) return;
+    if (!effectiveInvoiceId) return;
     try {
-      const res = await fetch(`/api/invoices/${booking.invoiceId}/send-payment-link`, { method: "POST" });
+      const res = await fetch(`/api/invoices/${effectiveInvoiceId}/send-payment-link`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to send payment link");
       setSendInvoiceMsg({ ok: true, text: "Payment link emailed to the client." });
@@ -617,7 +640,13 @@ function BookingDetailModal(props: {
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div className="col-span-2">
             <p className="text-xs text-muted-foreground">Cliente</p>
-            <p className="font-medium">{booking.name}</p>
+            {booking.clientId ? (
+              <Link to={`/clients/${booking.clientId}`} className="font-medium text-brand-copper hover:underline">
+                {booking.name}
+              </Link>
+            ) : (
+              <p className="font-medium">{booking.name}</p>
+            )}
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Email</p>
@@ -664,11 +693,13 @@ function BookingDetailModal(props: {
             onChange={(e) => setServiceId(Number(e.target.value))}
             className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
           >
-            {services.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} ({s.durationMinutes} min)
-              </option>
-            ))}
+            {[...services]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.durationMinutes} min)
+                </option>
+              ))}
           </select>
           <div className="grid grid-cols-2 gap-3">
             <input
@@ -700,12 +731,27 @@ function BookingDetailModal(props: {
             <option value="confirmed">Confirmado</option>
             <option value="pending_deposit">Pagamento pendente</option>
             <option value="completed">Concluído</option>
-            <option value="cancelled">Cancelado</option>
+            <option value="cancelled">Cancelada</option>
             <option value="no_show">Não compareceu</option>
           </select>
         </div>
 
-        {invoiceQ.data && (
+        {!effectiveInvoiceId && (
+          <div className="border-t pt-3 space-y-2">
+            <button
+              type="button"
+              onClick={generateInvoice}
+              disabled={generateInvoiceLoading}
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
+            >
+              {generateInvoiceLoading ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
+              Generate invoice
+            </button>
+            {generateInvoiceError && <p className="text-sm text-destructive">{generateInvoiceError}</p>}
+          </div>
+        )}
+
+        {effectiveInvoice && (
           <div className="border-t pt-3 space-y-2">
             <button
               type="button"
@@ -714,7 +760,7 @@ function BookingDetailModal(props: {
               className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
             >
               {sendInvoiceLoading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-              Send Invoice - {invoiceQ.data.invoiceNumber}
+              Send Invoice - {effectiveInvoice.invoiceNumber}
             </button>
             {sendInvoiceMsg && (
               <p className={`text-sm ${sendInvoiceMsg.ok ? "text-[#4C7A56]" : "text-destructive"}`}>{sendInvoiceMsg.text}</p>
@@ -722,14 +768,14 @@ function BookingDetailModal(props: {
           </div>
         )}
 
-        {invoiceQ.data && invoiceQ.data.status !== "paid" && invoiceQ.data.status !== "cancelled" && (
+        {effectiveInvoice && effectiveInvoice.status !== "paid" && effectiveInvoice.status !== "cancelled" && (
           <div className="border-t pt-3">
             <button
               type="button"
               onClick={requestPaymentLink}
               className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
             >
-              <Link2 className="size-4" /> Send Payment Link · Invoice {invoiceQ.data.invoiceNumber}
+              <Link2 className="size-4" /> Send Payment Link · Invoice {effectiveInvoice.invoiceNumber}
             </button>
           </div>
         )}
@@ -764,7 +810,7 @@ function BookingDetailModal(props: {
             </button>
             <h2 className="font-display text-xl font-semibold">Send Payment Link</h2>
             <p className="text-sm text-muted-foreground">
-              Invoice <strong>{invoiceQ.data?.invoiceNumber}</strong> — €{(invoiceQ.data?.total ?? 0).toFixed(2)}
+              Invoice <strong>{effectiveInvoice?.invoiceNumber}</strong> — €{(effectiveInvoice?.total ?? 0).toFixed(2)}
             </p>
 
             {checkoutLoading ? (
