@@ -586,7 +586,9 @@ function InvoicesContent() {
               onChange={(e) => setClientId(Number(e.target.value))}
             >
               <option value="">Select client…</option>
-              {clients.map((c) => (
+              {[...clients]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>

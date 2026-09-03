@@ -216,11 +216,13 @@ function MessagesContent() {
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
             >
               <option value="">— Selecionar —</option>
-              {(clientsQ.data ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
+              {[...(clientsQ.data ?? [])]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
             </select>
           </div>
           <div>
@@ -231,11 +233,13 @@ function MessagesContent() {
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
             >
               <option value="">— Selecionar —</option>
-              {(servicesQ.data ?? []).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
+              {[...(servicesQ.data ?? [])]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">

@@ -249,11 +249,13 @@ function PackageForm(props: {
           className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
         >
           <option value="">Selecionar cliente…</option>
-          {clients.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
+          {[...clients]
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
         </select>
         <input
           value={name}
