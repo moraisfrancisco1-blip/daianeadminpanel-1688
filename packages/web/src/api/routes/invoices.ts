@@ -319,7 +319,7 @@ export const invoicesRoute = new Hono()
     const id = Number(c.req.param("id"));
     const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
     if (!invoice) return c.json({ message: "Not found" }, 404);
-    if (invoice.status === "paid" || invoice.status === "cancelled") return c.json({ message: "Invoice is already paid or cancelled" }, 400);
+    if (invoice.status === "cancelled") return c.json({ message: "Invoice is cancelled" }, 400);
     const items = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, id));
     const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
     if (!client?.email) return c.json({ message: "Client has no email" }, 400);
@@ -361,7 +361,13 @@ export const invoicesRoute = new Hono()
       attachments: [{ filename: `invoice-${invoice.invoiceNumber}.pdf`, content: pdfBuffer }],
     });
 
-    await changeInvoiceStatus(id, "sent", { channel: "admin", type: "sent" });
+    // A resend of an already-paid invoice (e.g. the client says they never got
+    // it) stays "paid" — only draft/sent/overdue invoices transition to "sent".
+    if (invoice.status !== "paid") {
+      await changeInvoiceStatus(id, "sent", { channel: "admin", type: "sent" });
+    } else {
+      await recordInvoiceActivity({ invoiceId: id, type: "sent", channel: "admin", recipientEmail: client.email });
+    }
     return c.json({ success: true }, 200);
   })
   .post("/:id/send-payment-link", requireAuth, async (c) => {
