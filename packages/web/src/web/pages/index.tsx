@@ -825,7 +825,7 @@ function SessionsBarCard({
   );
 }
 
-const BIRTHDAY_TEMPLATE = "Olá {{name}}, hoje é o seu dia especial — desejo-lhe um feliz aniversário! 🎂💛 Um abraço da Studio Daï Oakes.";
+const BIRTHDAY_TEMPLATE = "Hi {{name}}, today is your special day — wishing you a very happy birthday! 🎂💛 With love from Studio Daï Oakes.";
 
 function BirthdayRow({
   birthday,
@@ -857,21 +857,21 @@ function BirthdayRow({
   const phoneDigits = birthday.phone?.replace(/[^\d+]/g, "");
   const waLink = phoneDigits ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(message)}` : null;
   const mailLink = birthday.email
-    ? `mailto:${birthday.email}?subject=${encodeURIComponent("Feliz aniversário! 🎂")}&body=${encodeURIComponent(message)}`
+    ? `mailto:${birthday.email}?subject=${encodeURIComponent("Happy Birthday! 🎂")}&body=${encodeURIComponent(message)}`
     : null;
 
   async function sendSms() {
     if (!birthday.phone) return;
-    setSmsStatus("A enviar…");
+    setSmsStatus("Sending…");
     try {
       const res = await api.sms.send.$post({
         json: { to: birthday.phone, message, clientId: birthday.clientId, templateId: "birthday" },
       });
       const data = (await res.json()) as { success?: boolean };
       if (!res.ok || !data.success) throw new Error();
-      setSmsStatus("Enviado ✓");
+      setSmsStatus("Sent ✓");
     } catch {
-      setSmsStatus("Falhou");
+      setSmsStatus("Failed");
     } finally {
       setTimeout(() => setSmsStatus(null), 2500);
     }
@@ -887,8 +887,8 @@ function BirthdayRow({
             {birthday.name}
           </Link>
           <p className="text-xs text-muted-foreground">
-            {birthday.daysUntil === 0 ? "Hoje 🎉" : `Daqui a ${birthday.daysUntil} dia${birthday.daysUntil === 1 ? "" : "s"}`}
-            {birthday.hasSessionThatDay && " · tem sessão marcada"}
+            {birthday.daysUntil === 0 ? "Today 🎉" : `In ${birthday.daysUntil} day${birthday.daysUntil === 1 ? "" : "s"}`}
+            {birthday.hasSessionThatDay && " · has a session booked"}
           </p>
         </div>
       </div>
@@ -896,7 +896,7 @@ function BirthdayRow({
         <button
           onClick={() => setOpen((v) => !v)}
           className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          title="Enviar mensagem"
+          title="Send message"
         >
           <MoreVertical className="size-4" />
         </button>
@@ -917,7 +917,7 @@ function BirthdayRow({
                     !mailLink && "opacity-40 pointer-events-none",
                   )}
                 >
-                  <Mail className="size-4" /> Enviar Email
+                  <Mail className="size-4" /> Send Email
                 </a>
                 <a
                   href={waLink ?? undefined}
@@ -932,21 +932,21 @@ function BirthdayRow({
                     !waLink && "opacity-40 pointer-events-none",
                   )}
                 >
-                  <MessageCircle className="size-4" /> Enviar WhatsApp
+                  <MessageCircle className="size-4" /> Send WhatsApp
                 </a>
                 <button
                   onClick={sendSms}
                   disabled={!birthday.phone}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent transition-colors disabled:opacity-40"
                 >
-                  <Smartphone className="size-4" /> Enviar SMS
+                  <Smartphone className="size-4" /> Send SMS
                 </button>
                 <Link
                   to={`/messages?clientId=${birthday.clientId}&template=birthday`}
                   onClick={() => setOpen(false)}
                   className="flex items-center gap-2.5 px-3 py-2 text-sm border-t border-border mt-1 pt-2 text-muted-foreground hover:bg-accent transition-colors"
                 >
-                  Editar mensagem…
+                  Edit message…
                 </Link>
               </>
             )}

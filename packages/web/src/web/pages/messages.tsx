@@ -25,38 +25,38 @@ const CHANNEL_LABEL: Record<string, string> = { whatsapp: "WhatsApp", sms: "SMS"
 const TEMPLATES = [
   {
     id: "confirmation",
-    label: "Confirmação de reserva",
-    body: "Olá {{name}}, a sua sessão de {{service}} está confirmada para {{date}} às {{time}}. Até breve! 💛",
+    label: "Booking confirmation",
+    body: "Hi {{name}}, your {{service}} session is confirmed for {{date}} at {{time}}. See you soon! 💛",
   },
   {
     id: "reminder",
-    label: "Lembrete de sessão",
-    body: "Olá {{name}}, só para lembrar: a sua sessão de {{service}} é {{date}} às {{time}}. Até já!",
+    label: "Session reminder",
+    body: "Hi {{name}}, just a reminder: your {{service}} session is on {{date}} at {{time}}. See you soon!",
   },
   {
     id: "payment",
-    label: "Pagamento pendente",
-    body: "Olá {{name}}, o pagamento referente à sua sessão de {{service}} ({{date}}) está pendente. Obrigada!",
+    label: "Payment pending",
+    body: "Hi {{name}}, the payment for your {{service}} session ({{date}}) is still pending. Thank you!",
   },
   {
     id: "reschedule",
-    label: "Reagendamento",
-    body: "Olá {{name}}, gostaria de reagendar a sua sessão de {{service}} ({{date}} às {{time}}). Qual horário lhe daria jeito?",
+    label: "Reschedule",
+    body: "Hi {{name}}, I'd like to reschedule your {{service}} session ({{date}} at {{time}}). What time would work for you?",
   },
   {
     id: "cancel",
-    label: "Cancelamento",
-    body: "Olá {{name}}, informo que a sua sessão de {{service}} em {{date}} às {{time}} foi cancelada. Obrigada pela compreensão.",
+    label: "Cancellation",
+    body: "Hi {{name}}, please note that your {{service}} session on {{date}} at {{time}} has been cancelled. Thank you for your understanding.",
   },
   {
     id: "thanks",
-    label: "Agradecimento",
-    body: "Olá {{name}}, obrigada pela sua visita! Foi um prazer. Até à próxima sessão de {{service}}! 🌿",
+    label: "Thank you",
+    body: "Hi {{name}}, thank you for your visit! It was a pleasure. See you at your next {{service}} session! 🌿",
   },
   {
     id: "birthday",
-    label: "Aniversário",
-    body: "Olá {{name}}, hoje é o seu dia especial — desejo-lhe um feliz aniversário! 🎂💛 Um abraço da Studio Daï Oakes.",
+    label: "Birthday",
+    body: "Hi {{name}}, today is your special day — wishing you a very happy birthday! 🎂💛 With love from Studio Daï Oakes.",
   },
 ];
 
@@ -139,10 +139,10 @@ function MessagesContent() {
   const message = useMemo(() => {
     const tpl = TEMPLATES.find((t) => t.id === templateId) ?? TEMPLATES[0];
     return tpl.body
-      .replaceAll("{{name}}", name || "Cliente")
-      .replaceAll("{{service}}", selectedService?.name ?? "sessão")
-      .replaceAll("{{date}}", date || "[data]")
-      .replaceAll("{{time}}", time || "[hora]");
+      .replaceAll("{{name}}", name || "Client")
+      .replaceAll("{{service}}", selectedService?.name ?? "session")
+      .replaceAll("{{date}}", date || "[date]")
+      .replaceAll("{{time}}", time || "[time]");
   }, [templateId, name, selectedService, date, time]);
 
   function copy() {
@@ -166,19 +166,19 @@ function MessagesContent() {
 
   const smsMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedClient?.phone) throw new Error("O cliente não tem número de telefone.");
+      if (!selectedClient?.phone) throw new Error("This client has no phone number.");
       const res = await api.sms.send.$post({
         json: { to: selectedClient.phone, message, clientId: selectedClient.id, templateId },
       });
       const data = (await res.json()) as { success?: boolean; message?: string };
-      if (!res.ok || !data.success) throw new Error(data.message ?? "Não foi possível enviar o SMS.");
+      if (!res.ok || !data.success) throw new Error(data.message ?? "Could not send the SMS.");
       return data;
     },
     onSuccess: () => {
-      setSmsStatus("SMS enviado com sucesso.");
+      setSmsStatus("SMS sent successfully.");
       qc.invalidateQueries({ queryKey: ["messages-log"] });
     },
-    onError: (error) => setSmsStatus(error instanceof Error ? error.message : "Não foi possível enviar o SMS."),
+    onError: (error) => setSmsStatus(error instanceof Error ? error.message : "Could not send the SMS."),
   });
 
   // WhatsApp/email open an external app, so this only records that the admin
@@ -202,8 +202,8 @@ function MessagesContent() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl font-semibold text-brand-teal">Mensagens rápidas</h1>
-        <p className="text-muted-foreground mt-1">Templates com preenchimento automático</p>
+        <h1 className="font-display text-3xl font-semibold text-brand-teal">Quick messages</h1>
+        <p className="text-muted-foreground mt-1">Auto-filled templates</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -223,7 +223,7 @@ function MessagesContent() {
             </select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Cliente</label>
+            <label className="text-xs text-muted-foreground">Client</label>
             <select
               value={clientId}
               onChange={(e) => {
@@ -234,7 +234,7 @@ function MessagesContent() {
               }}
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
             >
-              <option value="">— Selecionar —</option>
+              <option value="">— Select —</option>
               {[...(clientsQ.data ?? [])]
                 .sort((a, b) => a.name.localeCompare(b.name))
                 .map((c) => (
@@ -245,13 +245,13 @@ function MessagesContent() {
             </select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Serviço</label>
+            <label className="text-xs text-muted-foreground">Service</label>
             <select
               value={serviceId}
               onChange={(e) => setServiceId(e.target.value)}
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
             >
-              <option value="">— Selecionar —</option>
+              <option value="">— Select —</option>
               {[...(servicesQ.data ?? [])]
                 .sort((a, b) => a.name.localeCompare(b.name))
                 .map((s) => (
@@ -263,16 +263,16 @@ function MessagesContent() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-muted-foreground">Nome</label>
+              <label className="text-xs text-muted-foreground">Name</label>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Nome"
+                placeholder="Name"
                 className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
               />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground">Data</label>
+              <label className="text-xs text-muted-foreground">Date</label>
               <input
                 type="date"
                 value={date}
@@ -282,7 +282,7 @@ function MessagesContent() {
             </div>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Hora</label>
+            <label className="text-xs text-muted-foreground">Time</label>
             <input
               type="time"
               value={time}
@@ -293,14 +293,14 @@ function MessagesContent() {
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6 space-y-4">
-          <h3 className="font-medium">Pré-visualização</h3>
+          <h3 className="font-medium">Preview</h3>
           <div className="bg-secondary/40 rounded-lg p-4 text-sm whitespace-pre-wrap min-h-[120px]">{message}</div>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={copy}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
             >
-              {copied ? <Check className="size-4 text-[#4C7A56]" /> : <Copy className="size-4" />} {copied ? "Copiado!" : "Copiar"}
+              {copied ? <Check className="size-4 text-[#4C7A56]" /> : <Copy className="size-4" />} {copied ? "Copied!" : "Copy"}
             </button>
             <button
               type="button"
@@ -311,7 +311,7 @@ function MessagesContent() {
               disabled={!selectedClient?.phone || smsMutation.isPending}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium bg-brand-teal text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Smartphone className="size-4" /> {smsMutation.isPending ? "A enviar..." : "Enviar SMS"}
+              <Smartphone className="size-4" /> {smsMutation.isPending ? "Sending..." : "Send SMS"}
             </button>
             {waLink && (
               <a
@@ -335,11 +335,11 @@ function MessagesContent() {
             )}
           </div>
           {smsStatus && (
-            <p className={`text-sm ${smsStatus === "SMS enviado com sucesso." ? "text-green-700" : "text-red-600"}`}>{smsStatus}</p>
+            <p className={`text-sm ${smsStatus === "SMS sent successfully." ? "text-green-700" : "text-red-600"}`}>{smsStatus}</p>
           )}
           {!selectedClient?.phone && !selectedClient?.email && (
             <p className="text-xs text-muted-foreground">
-              Selecione um cliente com telefone ou email para abrir WhatsApp/Email diretamente.
+              Select a client with a phone number or email to open WhatsApp/Email directly.
             </p>
           )}
         </div>
@@ -347,16 +347,16 @@ function MessagesContent() {
 
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <h3 className="font-medium p-6 pb-3 flex items-center gap-2">
-          <History className="size-4 text-brand-copper" /> Mensagens recentes
+          <History className="size-4 text-brand-copper" /> Recent messages
         </h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[640px]">
             <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
               <tr>
-                <th className="px-6 py-3 font-medium">Cliente</th>
-                <th className="px-4 py-3 font-medium">Canal</th>
-                <th className="px-4 py-3 font-medium">Estado</th>
-                <th className="px-4 py-3 font-medium">Quando</th>
+                <th className="px-6 py-3 font-medium">Client</th>
+                <th className="px-4 py-3 font-medium">Channel</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">When</th>
               </tr>
             </thead>
             <tbody>
@@ -379,7 +379,7 @@ function MessagesContent() {
               {(messagesLogQ.data?.messages ?? []).length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
-                    Sem mensagens registadas.
+                    No messages logged yet.
                   </td>
                 </tr>
               )}
