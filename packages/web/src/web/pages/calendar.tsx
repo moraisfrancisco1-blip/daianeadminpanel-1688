@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Link, useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse } from "lucide-react";
 
 const FAR_DATE_WARNING_DAYS = 15;
 
@@ -30,6 +30,7 @@ type BookingItem = {
   depositStatus: string;
   payFullNow: boolean;
   invoiceId: number | null;
+  notes: string | null;
 };
 
 type BlockedSlot = { id: number; date: string; startTime: string; endTime: string; reason: string | null };
@@ -541,6 +542,7 @@ function BookingDetailModal(props: {
   const [date, setDate] = useState(booking.date);
   const [startTime, setStartTime] = useState(booking.startTime);
   const [status, setStatus] = useState(booking.status);
+  const [sessionNotes, setSessionNotes] = useState(booking.notes ?? "");
   const [paymentLinkOpen, setPaymentLinkOpen] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -596,6 +598,19 @@ function BookingDetailModal(props: {
     enabled: !!booking.invoiceId,
   });
   const effectiveInvoice = invoiceQ.data ?? generatedInvoice;
+
+  // Read-only reference: the client's standing clinical notes (tension areas,
+  // contraindications, history) — useful context while reviewing this session.
+  const clinicalNotesQ = useQuery({
+    queryKey: ["client-clinical-notes", booking.clientId],
+    queryFn: async () => {
+      const res = await fetch(`/api/clients/${booking.clientId}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data.client?.clinicalNotes as string | null) ?? null;
+    },
+    enabled: !!booking.clientId,
+  });
 
   async function requestPaymentLink() {
     if (!effectiveInvoiceId) return;
@@ -664,6 +679,14 @@ function BookingDetailModal(props: {
             <p className="text-xs text-muted-foreground">Estado</p>
             <p>{STATUS_LABEL[booking.status] ?? booking.status}</p>
           </div>
+          {clinicalNotesQ.data && (
+            <div className="col-span-2">
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <HeartPulse className="size-3" /> Notas clínicas (cliente)
+              </p>
+              <p className="text-sm whitespace-pre-wrap bg-muted/50 rounded-md px-2 py-1.5 mt-1">{clinicalNotesQ.data}</p>
+            </div>
+          )}
         </div>
 
         <div className="border-t pt-4 space-y-3">
@@ -734,6 +757,16 @@ function BookingDetailModal(props: {
             <option value="cancelled">Cancelada</option>
             <option value="no_show">Não compareceu</option>
           </select>
+          <div>
+            <label className="text-xs text-muted-foreground">Notas desta sessão</label>
+            <textarea
+              value={sessionNotes}
+              onChange={(e) => setSessionNotes(e.target.value)}
+              placeholder="Algo a lembrar sobre esta sessão em particular…"
+              rows={3}
+              className="w-full px-3 py-2 mt-1 rounded-md border border-input bg-background text-sm resize-none"
+            />
+          </div>
         </div>
 
         {!effectiveInvoiceId && (
@@ -792,7 +825,7 @@ function BookingDetailModal(props: {
             Cancelar
           </button>
           <button
-            onClick={() => onSave({ name, email, phone: phone || null, serviceId, date, startTime, status })}
+            onClick={() => onSave({ name, email, phone: phone || null, serviceId, date, startTime, status, notes: sessionNotes || null })}
             disabled={saving}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
           >

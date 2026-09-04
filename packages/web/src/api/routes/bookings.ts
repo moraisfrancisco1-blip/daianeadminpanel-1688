@@ -408,6 +408,7 @@ export const bookingsRoute = new Hono()
         invoiceId: bookings.invoiceId,
         invoiceStatus: invoices.status,
         invoiceNumber: invoices.invoiceNumber,
+        notes: bookings.notes,
       })
       .from(bookings)
       .leftJoin(services, eq(bookings.serviceId, services.id))
