@@ -53,6 +53,11 @@ const TEMPLATES = [
     label: "Agradecimento",
     body: "Olá {{name}}, obrigada pela sua visita! Foi um prazer. Até à próxima sessão de {{service}}! 🌿",
   },
+  {
+    id: "birthday",
+    label: "Aniversário",
+    body: "Olá {{name}}, hoje é o seu dia especial — desejo-lhe um feliz aniversário! 🎂💛 Um abraço da Studio Daï Oakes.",
+  },
 ];
 
 export default function MessagesPage() {
@@ -64,8 +69,13 @@ export default function MessagesPage() {
 }
 
 function MessagesContent() {
-  const [templateId, setTemplateId] = useState(TEMPLATES[0].id);
-  const [clientId, setClientId] = useState<string>("");
+  const initialParams = new URLSearchParams(window.location.search);
+  const initialClientId = initialParams.get("clientId") ?? "";
+  const initialTemplate = initialParams.get("template");
+  const [templateId, setTemplateId] = useState(
+    initialTemplate && TEMPLATES.some((t) => t.id === initialTemplate) ? initialTemplate : TEMPLATES[0].id,
+  );
+  const [clientId, setClientId] = useState<string>(initialClientId);
   const [serviceId, setServiceId] = useState<string>("");
   const [name, setName] = useState("");
   const [date, setDate] = useState("");
@@ -103,6 +113,15 @@ function MessagesContent() {
     },
     enabled: !!clientId,
   });
+
+  // Fills in the name when a client is preselected via URL (e.g. from the
+  // dashboard's birthday card) — the client list loads async, unlike a
+  // click on the dropdown which already has the row's name at hand.
+  useEffect(() => {
+    if (!clientId || name) return;
+    const c = clientsQ.data?.find((x) => x.id === Number(clientId));
+    if (c) setName(c.name);
+  }, [clientId, clientsQ.data, name]);
 
   useEffect(() => {
     if (!clientId || !clientDetailQ.data) return;

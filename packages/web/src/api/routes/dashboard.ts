@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { db } from "../database";
 import { invoices, clients, bookings, invoiceItems, services, payments, clientNotes, packages } from "../database/schema";
 import { requireAuth } from "../middleware/auth";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { stripe } from "../services/stripe";
 
 // ── Timezone helpers (Europe/Amsterdam) ──────────────────────────────
@@ -202,6 +202,56 @@ export const dashboardRoute = new Hono()
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
     return c.json({ total: activeThisMonth.length, breakdown }, 200);
+  })
+  .get("/upcoming-birthdays", requireAuth, async (c) => {
+    const BIRTHDAY_WINDOW_DAYS = 7;
+    const today = amsTodayStr();
+    const todayMidnight = new Date(`${today}T00:00:00`);
+    const now = new Date();
+
+    const allClients = await db.select().from(clients);
+    const allBookings = await db
+      .select()
+      .from(bookings)
+      .where(inArray(bookings.status, ["confirmed", "completed", "pending_deposit"]));
+    const bookingsByClientDate = new Map<string, boolean>();
+    for (const b of allBookings) {
+      if (b.clientId == null) continue;
+      bookingsByClientDate.set(`${b.clientId}|${b.date}`, true);
+    }
+
+    const upcoming: {
+      clientId: number;
+      name: string;
+      email: string | null;
+      phone: string | null;
+      date: string;
+      daysUntil: number;
+      hasSessionThatDay: boolean;
+    }[] = [];
+
+    for (const cl of allClients) {
+      if (!cl.dateOfBirth) continue;
+      const dob = new Date(cl.dateOfBirth);
+      let nextBirthday = new Date(now.getFullYear(), dob.getMonth(), dob.getDate());
+      if (nextBirthday < todayMidnight) nextBirthday = new Date(now.getFullYear() + 1, dob.getMonth(), dob.getDate());
+      const daysUntil = Math.round((nextBirthday.getTime() - todayMidnight.getTime()) / (24 * 60 * 60 * 1000));
+      if (daysUntil < 0 || daysUntil > BIRTHDAY_WINDOW_DAYS) continue;
+
+      const dateStr = `${nextBirthday.getFullYear()}-${String(nextBirthday.getMonth() + 1).padStart(2, "0")}-${String(nextBirthday.getDate()).padStart(2, "0")}`;
+      upcoming.push({
+        clientId: cl.id,
+        name: cl.name,
+        email: cl.email,
+        phone: cl.phone,
+        date: dateStr,
+        daysUntil,
+        hasSessionThatDay: bookingsByClientDate.has(`${cl.id}|${dateStr}`),
+      });
+    }
+
+    upcoming.sort((a, b) => a.daysUntil - b.daysUntil);
+    return c.json({ upcoming }, 200);
   })
   .get("/top-clients", requireAuth, async (c) => {
     const limit = Number(c.req.query("limit") ?? 5);

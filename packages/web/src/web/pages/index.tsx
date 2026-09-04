@@ -16,9 +16,14 @@ import {
   CreditCard,
   Euro,
   CheckCircle2,
+  Cake,
+  MoreVertical,
+  Mail,
+  MessageCircle,
+  Smartphone,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, AreaChart, Area } from "recharts";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 
 function serviceAccent(name?: string | null): { bg: string } {
@@ -102,6 +107,10 @@ function DashboardContent() {
   const alertsData = useQuery({
     queryKey: ["dashboard-alerts"],
     queryFn: async (): Promise<any> => (await api.dashboard.alerts.$get()).json(),
+  });
+  const birthdaysData = useQuery({
+    queryKey: ["dashboard-upcoming-birthdays"],
+    queryFn: async (): Promise<any> => (await api.dashboard["upcoming-birthdays"].$get()).json(),
   });
 
   // best-effort trigger of overdue reminder check on load (fallback automation)
@@ -262,6 +271,21 @@ function DashboardContent() {
           </div>
         )}
       </div>
+
+      {/* Upcoming birthdays */}
+      {(birthdaysData.data?.upcoming ?? []).length > 0 && (
+        <div className="bg-card border border-border rounded-xl p-6">
+          <h3 className="font-display text-lg font-medium mb-1 flex items-center gap-2">
+            <Cake className="size-4 text-brand-copper" /> Upcoming birthdays
+          </h3>
+          <p className="text-xs text-muted-foreground mb-4">Next 7 days</p>
+          <div className="divide-y divide-border">
+            {(birthdaysData.data?.upcoming ?? []).map((b: any) => (
+              <BirthdayRow key={b.clientId} birthday={b} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Financial summary — faturado vs recebido vs pendente + sessões por serviço */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -797,6 +821,138 @@ function SessionsBarCard({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+const BIRTHDAY_TEMPLATE = "Olá {{name}}, hoje é o seu dia especial — desejo-lhe um feliz aniversário! 🎂💛 Um abraço da Studio Daï Oakes.";
+
+function BirthdayRow({
+  birthday,
+}: {
+  birthday: {
+    clientId: number;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    date: string;
+    daysUntil: number;
+    hasSessionThatDay: boolean;
+  };
+}) {
+  const [open, setOpen] = useState(false);
+  const [smsStatus, setSmsStatus] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  const message = BIRTHDAY_TEMPLATE.replace("{{name}}", birthday.name);
+  const phoneDigits = birthday.phone?.replace(/[^\d+]/g, "");
+  const waLink = phoneDigits ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(message)}` : null;
+  const mailLink = birthday.email
+    ? `mailto:${birthday.email}?subject=${encodeURIComponent("Feliz aniversário! 🎂")}&body=${encodeURIComponent(message)}`
+    : null;
+
+  async function sendSms() {
+    if (!birthday.phone) return;
+    setSmsStatus("A enviar…");
+    try {
+      const res = await api.sms.send.$post({
+        json: { to: birthday.phone, message, clientId: birthday.clientId, templateId: "birthday" },
+      });
+      const data = (await res.json()) as { success?: boolean };
+      if (!res.ok || !data.success) throw new Error();
+      setSmsStatus("Enviado ✓");
+    } catch {
+      setSmsStatus("Falhou");
+    } finally {
+      setTimeout(() => setSmsStatus(null), 2500);
+    }
+    setOpen(false);
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+      <div className="min-w-0 flex items-center gap-2">
+        <span className="size-2 rounded-full bg-brand-copper shrink-0" />
+        <div className="min-w-0">
+          <Link to={`/clients/${birthday.clientId}`} className="text-sm font-medium hover:underline">
+            {birthday.name}
+          </Link>
+          <p className="text-xs text-muted-foreground">
+            {birthday.daysUntil === 0 ? "Hoje 🎉" : `Daqui a ${birthday.daysUntil} dia${birthday.daysUntil === 1 ? "" : "s"}`}
+            {birthday.hasSessionThatDay && " · tem sessão marcada"}
+          </p>
+        </div>
+      </div>
+      <div className="relative shrink-0" ref={ref}>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          title="Enviar mensagem"
+        >
+          <MoreVertical className="size-4" />
+        </button>
+        {open && (
+          <div className="absolute right-0 mt-1 w-56 rounded-lg border border-border bg-card shadow-lg py-1.5 z-50">
+            {smsStatus ? (
+              <p className="px-3 py-2 text-sm text-muted-foreground">{smsStatus}</p>
+            ) : (
+              <>
+                <a
+                  href={mailLink ?? undefined}
+                  onClick={(e) => {
+                    if (!mailLink) e.preventDefault();
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent transition-colors",
+                    !mailLink && "opacity-40 pointer-events-none",
+                  )}
+                >
+                  <Mail className="size-4" /> Enviar Email
+                </a>
+                <a
+                  href={waLink ?? undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => {
+                    if (!waLink) e.preventDefault();
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent transition-colors",
+                    !waLink && "opacity-40 pointer-events-none",
+                  )}
+                >
+                  <MessageCircle className="size-4" /> Enviar WhatsApp
+                </a>
+                <button
+                  onClick={sendSms}
+                  disabled={!birthday.phone}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent transition-colors disabled:opacity-40"
+                >
+                  <Smartphone className="size-4" /> Enviar SMS
+                </button>
+                <Link
+                  to={`/messages?clientId=${birthday.clientId}&template=birthday`}
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 text-sm border-t border-border mt-1 pt-2 text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  Editar mensagem…
+                </Link>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
