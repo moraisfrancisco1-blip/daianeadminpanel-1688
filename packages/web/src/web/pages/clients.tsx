@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button";
 import { AddressLookupFields, type FoundAddress } from "../components/address-lookup-fields";
 import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
-import { Plus, Mail, Phone, X, Pencil, Trash2 } from "lucide-react";
+import { Plus, Mail, Phone, X, Pencil, Trash2, AlertTriangle } from "lucide-react";
 import { Link } from "wouter";
 
 export default function ClientsPage() {
@@ -29,6 +29,8 @@ function ClientsContent() {
   const [showForm, setShowForm] = useState(false);
   const [editingClient, setEditingClient] = useState<any>(null);
   const [deletingClient, setDeletingClient] = useState<any>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<any[] | null>(null);
+  const [pendingClientData, setPendingClientData] = useState<any | null>(null);
   const qc = useQueryClient();
   const { sortKey, sortDir, toggle } = useSort<ClientSortKey>("name", "asc");
 
@@ -63,8 +65,21 @@ function ClientsContent() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["clients"] });
       setShowForm(false);
+      setPendingClientData(null);
     },
   });
+
+  function findPossibleDuplicates(data: { name?: string; email?: string; phone?: string }) {
+    const nameN = normalize(data.name ?? "");
+    const emailN = normalize(data.email ?? "");
+    const phoneN = normalize(data.phone ?? "");
+    return clientList.filter((c: any) => {
+      if (emailN && c.email && normalize(c.email) === emailN) return true;
+      if (phoneN && c.phone && normalize(c.phone) === phoneN) return true;
+      if (nameN && normalize(c.name) === nameN) return true;
+      return false;
+    });
+  }
 
   const updateClient = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: any }) => {
@@ -200,7 +215,7 @@ function ClientsContent() {
               onSubmit={(e) => {
                 e.preventDefault();
                 const fd = new FormData(e.currentTarget);
-                createClient.mutate({
+                const data = {
                   name: fd.get("name"),
                   email: fd.get("email"),
                   phone: fd.get("phone"),
@@ -210,7 +225,14 @@ function ClientsContent() {
                   country: fd.get("country"),
                   dateOfBirth: fd.get("dateOfBirth") || null,
                   debtorNumber: fd.get("debtorNumber"),
-                });
+                };
+                const dupes = findPossibleDuplicates(data as any);
+                if (dupes.length > 0) {
+                  setPendingClientData(data);
+                  setDuplicateWarning(dupes);
+                  return;
+                }
+                createClient.mutate(data);
               }}
               className="space-y-3"
             >
@@ -238,6 +260,66 @@ function ClientsContent() {
                 {createClient.isPending ? "Saving…" : "Save client"}
               </Button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {duplicateWarning && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+          <div className="bg-card rounded-xl p-6 w-full max-w-md space-y-4 relative">
+            <button
+              onClick={() => {
+                setDuplicateWarning(null);
+                setPendingClientData(null);
+              }}
+              className="absolute top-4 right-4 text-muted-foreground"
+            >
+              <X className="size-4" />
+            </button>
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="size-5 text-amber-500 mt-0.5 shrink-0" />
+              <div>
+                <h2 className="font-display text-lg font-semibold">Possible existing client found</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Someone with the same name, email or phone is already in the system.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {duplicateWarning.map((c: any) => (
+                <Link
+                  key={c.id}
+                  to={`/clients/${c.id}`}
+                  className="block rounded-lg border border-border px-3 py-2 hover:bg-accent transition-colors"
+                >
+                  <p className="text-sm font-medium">{c.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {[c.email, c.phone].filter(Boolean).join(" · ") || "—"}
+                  </p>
+                </Link>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setDuplicateWarning(null);
+                  setPendingClientData(null);
+                }}
+                className="flex-1 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (pendingClientData) createClient.mutate(pendingClientData);
+                  setDuplicateWarning(null);
+                }}
+                disabled={createClient.isPending}
+                className="flex-1 px-3 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
+              >
+                Create anyway
+              </button>
+            </div>
           </div>
         </div>
       )}
