@@ -123,7 +123,9 @@ function QuotesContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientId, items }),
       });
-      return await res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to update quote.");
+      return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["quotes"] });
@@ -132,7 +134,7 @@ function QuotesContent() {
       resetForm();
       showToast("success", "Quote updated.");
     },
-    onError: () => showToast("error", "Failed to update quote."),
+    onError: (err: any) => showToast("error", err?.message ?? "Failed to update quote."),
   });
 
   const deleteQuote = useMutation({
@@ -177,7 +179,7 @@ function QuotesContent() {
     try {
       const res = await fetch(`/api/quotes/${q.id}`);
       const data = await res.json();
-      if (!res.ok) return;
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to load quote details.");
       setEditId(q.id);
       setClientId(data.client?.id ?? null);
       setItems(

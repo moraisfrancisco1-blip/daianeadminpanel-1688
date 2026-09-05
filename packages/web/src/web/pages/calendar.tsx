@@ -743,7 +743,7 @@ function BookingDetailModal(props: {
               <AlertTriangle className="size-3.5 shrink-0" />
               {new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
               {" — "}
-              {daysFromToday(date) > 0 ? "isto é daqui a" : "isto foi há"} {Math.abs(daysFromToday(date))} dias. Confirma que é a data certa.
+              that's {Math.abs(daysFromToday(date))} days {daysFromToday(date) > 0 ? "from now" : "ago"}. Please confirm this is the right date.
             </p>
           )}
           <select

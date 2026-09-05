@@ -381,7 +381,7 @@ function BookingManualContent() {
                     <AlertTriangle className="size-3.5 shrink-0" />
                     {new Date(`${formData.date}T00:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
                     {" — "}
-                    {daysFromToday(formData.date) > 0 ? "isto é daqui a" : "isto foi há"} {Math.abs(daysFromToday(formData.date))} dias. Confirma que é a data certa.
+                    that's {Math.abs(daysFromToday(formData.date))} days {daysFromToday(formData.date) > 0 ? "from now" : "ago"}. Please confirm this is the right date.
                   </p>
                 )}
               </div>

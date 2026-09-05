@@ -213,7 +213,9 @@ function InvoicesContent() {
           status: undefined, // keep existing
         }),
       });
-      return await res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to update invoice.");
+      return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["invoices"] });
@@ -222,7 +224,7 @@ function InvoicesContent() {
       resetForm();
       showToast("success", "Invoice updated.");
     },
-    onError: () => showToast("error", "Failed to update invoice."),
+    onError: (err: any) => showToast("error", err?.message ?? "Failed to update invoice."),
   });
 
   const markPaid = useMutation({
@@ -232,9 +234,12 @@ function InvoicesContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "paid" }),
       });
-      return await res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to mark invoice as paid.");
+      return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["invoices"] }),
+    onError: (err: any) => showToast("error", err?.message ?? "Failed to mark invoice as paid."),
   });
 
   const sendInvoice = useMutation({
@@ -332,7 +337,7 @@ function InvoicesContent() {
     try {
       const res = await fetch(`/api/invoices/${inv.id}`);
       const data = await res.json();
-      if (!res.ok) return;
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to load invoice details.");
       setEditId(inv.id);
       setClientId(data.invoice.clientId);
       setInvoiceNumber(data.invoice.invoiceNumber);
