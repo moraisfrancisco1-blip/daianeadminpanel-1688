@@ -109,15 +109,38 @@ export const paymentControlRoute = new Hono()
   })
   .post("/verify", requireAuth, async (c) => {
     const all = await db.select().from(invoices);
+    const allPayments = await db.select().from(payments);
+    const hasPaymentByInvoice = new Set(allPayments.map((p) => p.invoiceId));
+    const allRefunds = await db.select().from(refunds);
+    const refundedByInvoice = new Map<number, number>();
+    for (const r of allRefunds) {
+      if (r.status !== "succeeded") continue;
+      refundedByInvoice.set(r.invoiceId, (refundedByInvoice.get(r.invoiceId) ?? 0) + r.amount);
+    }
+
     const results: { id: number; invoiceNumber: string; action: string }[] = [];
     let fixed = 0;
     let checked = 0;
+    let skipped = 0;
     for (const inv of all) {
       if (inv.isTest) continue;
+
+      // Skip a live Stripe round-trip for invoices that are already fully
+      // settled (confirmed/cancelled/refunded) or never had a Stripe checkout
+      // to begin with (cash, manual, or package-paid bookings) — their state
+      // cannot change, so there's nothing left to reconcile.
+      const hasStripeRef = !!inv.stripeCheckoutSessionId || !!inv.stripePaymentIntentId;
+      const { state } = derivePaymentState(inv, hasPaymentByInvoice.has(inv.id), refundedByInvoice.get(inv.id) ?? 0);
+      const settled = state === "confirmed" || state === "cancelled" || state === "refunded" || state === "partially_refunded";
+      if (!hasStripeRef || settled) {
+        skipped++;
+        continue;
+      }
+
       const r = await verifyAndReconcileInvoice(inv);
       checked++;
       if (r.fixed) fixed++;
       results.push({ id: inv.id, invoiceNumber: inv.invoiceNumber, action: r.action });
     }
-    return c.json({ checked, fixed, results }, 200);
+    return c.json({ checked, fixed, skipped, results }, 200);
   });

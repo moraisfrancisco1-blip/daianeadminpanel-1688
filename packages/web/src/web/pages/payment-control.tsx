@@ -81,7 +81,7 @@ function PaymentControlContent() {
     onSuccess: (d: any) => {
       qc.invalidateQueries({ queryKey: ["payment-control"] });
       qc.invalidateQueries({ queryKey: ["invoices"] });
-      setToast(`Verify done: ${d.checked} checked, ${d.fixed} fixed.`);
+      setToast(`Verify done: ${d.checked} checked, ${d.fixed} fixed, ${d.skipped ?? 0} already settled (skipped).`);
       setTimeout(() => setToast(null), 5000);
     },
     onError: (e: any) => {
