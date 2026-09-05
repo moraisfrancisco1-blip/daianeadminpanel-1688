@@ -236,6 +236,22 @@ export const remindersRoute = new Hono()
     const rebook = await runRebookReminderCheck();
     return c.json({ sent, postSession, sessionReminders, rebook }, 200);
   })
+  // Vercel Cron hits this with a GET request and, when CRON_SECRET is set on the
+  // project, an automatic "Authorization: Bearer <CRON_SECRET>" header — this is
+  // what makes reminders keep firing on days nobody opens the dashboard. See
+  // vercel.json for the schedule. Not linked from the UI; no admin session exists
+  // for a cron-triggered request, so it's authenticated by the shared secret instead.
+  .get("/cron", async (c) => {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return c.json({ message: "CRON_SECRET is not configured" }, 501);
+    const auth = c.req.header("authorization");
+    if (auth !== `Bearer ${secret}`) return c.json({ message: "Unauthorized" }, 401);
+    const sent = await runReminderCheck();
+    const postSession = await runPostSessionEmails();
+    const sessionReminders = await runSessionReminderCheck();
+    const rebook = await runRebookReminderCheck();
+    return c.json({ sent, postSession, sessionReminders, rebook }, 200);
+  })
   // Send the post-session review/promo email immediately for one booking.
   .post("/post-session/:bookingId/send-now", requireAuth, async (c) => {
     const id = Number(c.req.param("bookingId"));

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { Button } from "../components/ui/button";
-import { RefreshCw, Copy, CalendarCheck, CalendarX, Link2Off } from "lucide-react";
+import { RefreshCw, CalendarCheck, CalendarX, Link2Off } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export default function RemindersPage() {
@@ -14,7 +14,6 @@ export default function RemindersPage() {
 }
 
 function RemindersContent() {
-  const [copied, setCopied] = useState(false);
   const qc = useQueryClient();
   const overdue = useQuery({
     queryKey: ["overdue"],
@@ -78,8 +77,6 @@ function RemindersContent() {
       `width=${w},height=${h},left=${left},top=${top}`,
     );
   }
-
-  const webhookUrl = `${window.location.origin}/api/reminders/run`;
 
   return (
     <div className="space-y-6">
@@ -176,29 +173,13 @@ function RemindersContent() {
       </div>
 
       <div className="bg-card border border-border rounded-xl p-5">
-        <h3 className="font-medium mb-1">Fully automated (recommended)</h3>
-        <p className="text-sm text-muted-foreground mb-3">
-          This app checks for overdue invoices every time you open the dashboard. For true unattended automation
-          (even on days you don't log in), add a free scheduled call to this URL once a day using{" "}
-          <a href="https://cron-job.org" target="_blank" rel="noreferrer" className="text-primary underline">
-            cron-job.org
-          </a>{" "}
-          (method: POST):
+        <h3 className="font-medium mb-1">Fully automated</h3>
+        <p className="text-sm text-muted-foreground">
+          A daily Vercel Cron Job runs all reminder checks automatically at 06:00 UTC, even on days nobody opens the
+          dashboard — no third-party service needed. One-time setup: add a <code className="font-mono">CRON_SECRET</code>{" "}
+          environment variable in the Vercel project settings (any random string) and redeploy. Until it's set, this
+          only runs when you open this page or click "Run check now" above.
         </p>
-        <div className="flex items-center gap-2 bg-secondary/50 rounded-md px-3 py-2 text-xs font-mono">
-          <span className="flex-1 truncate">{webhookUrl}</span>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(webhookUrl);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-            className="text-muted-foreground hover:text-primary"
-          >
-            <Copy className="size-4" />
-          </button>
-        </div>
-        {copied && <p className="text-xs text-primary mt-1">Copied!</p>}
       </div>
 
       {overdue.isLoading ? (

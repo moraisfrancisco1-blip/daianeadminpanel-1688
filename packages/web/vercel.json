@@ -3,5 +3,8 @@
     { "source": "/api", "destination": "/api" },
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/reminders/cron", "schedule": "0 6 * * *" }
   ]
 }
