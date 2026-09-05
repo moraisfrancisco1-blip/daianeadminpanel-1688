@@ -43,7 +43,7 @@ function PackagesContent() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Pkg | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("clientId") ?? "");
   const { sortKey, sortDir, toggle } = useSort<PkgSortKey>("client", "asc");
 
   const notify = (m: string) => {
@@ -61,18 +61,23 @@ function PackagesContent() {
   });
 
   const redeem = useMutation({
-    mutationFn: async (id: number) => (await api.packages[":id"].use.$post({ param: { id: String(id) } })).json(),
+    mutationFn: async (id: number) => {
+      const res = await api.packages[":id"].use.$post({ param: { id: String(id) } });
+      const data = (await res.json()) as { message?: string };
+      if (!res.ok) throw new Error(data.message ?? "Erro.");
+      return data;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
-      notify("Sessão descontada.");
+      notify("Session redeemed.");
     },
-    onError: (e: any) => notify(e?.message ?? "Erro."),
+    onError: (e: any) => notify(e?.message ?? "Error."),
   });
   const remove = useMutation({
     mutationFn: async (id: number) => (await api.packages[":id"].$delete({ param: { id: String(id) } })).json(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["packages"] });
-      notify("Pacote removido.");
+      notify("Package removed.");
     },
   });
   const save = useMutation({
@@ -86,7 +91,7 @@ function PackagesContent() {
       qc.invalidateQueries({ queryKey: ["packages"] });
       setShowForm(false);
       setEditing(null);
-      notify("Guardado.");
+      notify("Saved.");
     },
   });
 
@@ -110,8 +115,8 @@ function PackagesContent() {
       )}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="font-display text-3xl font-semibold text-brand-teal">Pacotes &amp; Créditos</h1>
-          <p className="text-muted-foreground mt-1">Sessões pré-pagas por cliente</p>
+          <h1 className="font-display text-3xl font-semibold text-brand-teal">Packages &amp; Credits</h1>
+          <p className="text-muted-foreground mt-1">Prepaid sessions per client</p>
         </div>
         <button
           onClick={() => {
@@ -120,11 +125,11 @@ function PackagesContent() {
           }}
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90"
         >
-          <Plus className="size-4" /> Novo pacote
+          <Plus className="size-4" /> New package
         </button>
       </div>
 
-      <SearchInput value={search} onChange={setSearch} placeholder="Pesquisar por cliente, pacote ou #ID…" />
+      <SearchInput value={search} onChange={setSearch} placeholder="Search by client, package or #ID…" />
 
       {pkgs.isLoading ? (
         <div className="h-40 rounded-xl bg-muted animate-pulse" />
@@ -134,13 +139,13 @@ function PackagesContent() {
             <table className="w-full text-sm min-w-[640px]">
               <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
                 <tr>
-                  <SortableTh label="Cliente" active={sortKey === "client"} dir={sortDir} onClick={() => toggle("client")} />
-                  <SortableTh label="Pacote" active={sortKey === "name"} dir={sortDir} onClick={() => toggle("name")} />
-                  <SortableTh label="Sessões" active={sortKey === "sessions"} dir={sortDir} onClick={() => toggle("sessions")} />
-                  <SortableTh label="Restantes" active={sortKey === "remaining"} dir={sortDir} onClick={() => toggle("remaining")} />
-                  <SortableTh label="Preço" active={sortKey === "price"} dir={sortDir} onClick={() => toggle("price")} />
-                  <SortableTh label="Expira" active={sortKey === "expires"} dir={sortDir} onClick={() => toggle("expires")} />
-                  <th className="px-4 py-3 font-medium text-right">Ações</th>
+                  <SortableTh label="Client" active={sortKey === "client"} dir={sortDir} onClick={() => toggle("client")} />
+                  <SortableTh label="Package" active={sortKey === "name"} dir={sortDir} onClick={() => toggle("name")} />
+                  <SortableTh label="Sessions" active={sortKey === "sessions"} dir={sortDir} onClick={() => toggle("sessions")} />
+                  <SortableTh label="Remaining" active={sortKey === "remaining"} dir={sortDir} onClick={() => toggle("remaining")} />
+                  <SortableTh label="Price" active={sortKey === "price"} dir={sortDir} onClick={() => toggle("price")} />
+                  <SortableTh label="Expires" active={sortKey === "expires"} dir={sortDir} onClick={() => toggle("expires")} />
+                  <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -159,14 +164,14 @@ function PackagesContent() {
                       <td className="px-4 py-3">€{p.price.toFixed(2)}</td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {p.expiresAt ? new Date(p.expiresAt).toLocaleDateString("en-GB") : "—"}
-                        {expired ? " (expirado)" : ""}
+                        {expired ? " (expired)" : ""}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => redeem.mutate(p.id)}
-                            disabled={remaining <= 0 || redeem.isPending}
-                            title="Descontar sessão"
+                            disabled={remaining <= 0 || expired || redeem.isPending}
+                            title="Redeem session"
                             className="p-1.5 rounded text-muted-foreground hover:text-primary disabled:opacity-40"
                           >
                             {redeem.isPending && redeem.variables === p.id ? (
@@ -181,13 +186,13 @@ function PackagesContent() {
                               setShowForm(true);
                             }}
                             className="p-1.5 rounded text-muted-foreground hover:text-primary"
-                            title="Editar"
+                            title="Edit"
                           >
                             <Pencil className="size-4" />
                           </button>
                           <button
                             onClick={() => {
-                              if (window.confirm(`Remover pacote de ${p.clientName ?? "?"}?`)) remove.mutate(p.id);
+                              if (window.confirm(`Remove ${p.clientName ?? "?"}'s package?`)) remove.mutate(p.id);
                             }}
                             className="p-1.5 rounded text-muted-foreground hover:text-destructive"
                           >
@@ -198,7 +203,7 @@ function PackagesContent() {
                     </tr>
                   );
                 })}
-                {sorted.length === 0 && <EmptyRow colSpan={7} searching={q.length > 0} noun="pacotes" />}
+                {sorted.length === 0 && <EmptyRow colSpan={7} searching={q.length > 0} noun="packages" />}
               </tbody>
             </table>
           </div>
@@ -242,13 +247,13 @@ function PackageForm(props: {
         <button onClick={onClose} className="absolute top-4 right-4 text-muted-foreground">
           <X className="size-4" />
         </button>
-        <h2 className="font-display text-xl font-semibold">{editing ? "Editar pacote" : "Novo pacote"}</h2>
+        <h2 className="font-display text-xl font-semibold">{editing ? "Edit package" : "New package"}</h2>
         <select
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
           className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
         >
-          <option value="">Selecionar cliente…</option>
+          <option value="">Select client…</option>
           {[...clients]
             .sort((a, b) => a.name.localeCompare(b.name))
             .map((c) => (
@@ -260,7 +265,7 @@ function PackageForm(props: {
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Nome (ex: Pacote 5 sessões)"
+          placeholder="Name (e.g. 5-session package)"
           className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
         />
         <div className="grid grid-cols-2 gap-3">
@@ -269,7 +274,7 @@ function PackageForm(props: {
             min={1}
             value={totalSessions}
             onChange={(e) => setTotalSessions(e.target.value)}
-            placeholder="Sessões"
+            placeholder="Sessions"
             className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
           />
           <input
@@ -278,7 +283,7 @@ function PackageForm(props: {
             step="0.01"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
-            placeholder="Preço"
+            placeholder="Price"
             className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
           />
         </div>
@@ -287,17 +292,17 @@ function PackageForm(props: {
           value={expiresAt}
           onChange={(e) => setExpiresAt(e.target.value)}
           className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-          title="Validade (opcional)"
+          title="Expiry (optional)"
         />
         <input
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Notas (opcional)"
+          placeholder="Notes (optional)"
           className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
         />
         <div className="flex justify-end gap-3 pt-1">
           <button onClick={onClose} className="px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent">
-            Cancelar
+            Cancel
           </button>
           <button
             disabled={saving || !clientId || !name}
@@ -313,7 +318,7 @@ function PackageForm(props: {
             }
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
           >
-            {saving && <Loader2 className="size-4 animate-spin" />} Guardar
+            {saving && <Loader2 className="size-4 animate-spin" />} Save
           </button>
         </div>
       </div>

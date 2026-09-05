@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { clients, invoices, bookings, payments, quotes, services, clientNotes } from "../database/schema";
+import { clients, invoices, bookings, payments, quotes, services, clientNotes, packages } from "../database/schema";
 import { eq, desc, inArray, or } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { createStripeCustomer, updateStripeCustomer, findStripeCustomerByEmail } from "../services/stripe-sync";
@@ -58,6 +58,12 @@ export const clientsRoute = new Hono()
       .where(eq(clientNotes.clientId, id))
       .orderBy(desc(clientNotes.createdAt));
 
+    const clientPackages = await db
+      .select()
+      .from(packages)
+      .where(eq(packages.clientId, id))
+      .orderBy(desc(packages.purchasedAt));
+
     return c.json(
       {
         client,
@@ -66,6 +72,7 @@ export const clientsRoute = new Hono()
         payments: clientPayments,
         bookings: clientBookings,
         notes: clientNotesList,
+        packages: clientPackages,
       },
       200,
     );

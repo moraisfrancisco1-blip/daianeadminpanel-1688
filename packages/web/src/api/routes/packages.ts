@@ -77,6 +77,9 @@ export const packagesRoute = new Hono()
     if (pkg.sessionsUsed >= pkg.totalSessions) {
       return c.json({ message: "Package has no remaining sessions" }, 400);
     }
+    if (pkg.expiresAt && pkg.expiresAt.getTime() < Date.now()) {
+      return c.json({ message: "Package has expired" }, 400);
+    }
     const [updated] = await db
       .update(packages)
       .set({ sessionsUsed: pkg.sessionsUsed + 1 })
