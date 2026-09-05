@@ -271,6 +271,21 @@ export function buildInvoiceEmailHtml(opts: {
 }
 
 // ============================================================================
+// 5b. QUOTE EMAIL
+// ============================================================================
+export function buildQuoteEmailHtml(opts: { clientName: string; quoteNumber: string; total: number; validUntil?: Date | null }) {
+  return wrapper(`
+    <p>Dear ${opts.clientName},</p>
+    <p>Please find attached quote <strong>${opts.quoteNumber}</strong> for <strong>€${opts.total.toFixed(2)}</strong>${
+      opts.validUntil ? `, valid until ${opts.validUntil.toLocaleDateString("en-GB")}` : ""
+    }.</p>
+    <p>Let us know if you have any questions or would like to go ahead.</p>
+    <p>Thank you for considering Studio Daï Oakes.</p>
+    <p style="color:${COPPER};font-style:italic;">— Daiane</p>
+  `);
+}
+
+// ============================================================================
 // 6. PAYMENT LINK EMAIL  (separate from the invoice PDF email — sends only the link)
 // ============================================================================
 export function buildPaymentLinkEmailHtml(opts: {

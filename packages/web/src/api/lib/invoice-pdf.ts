@@ -44,6 +44,9 @@ interface InvoicePdfData {
   status?: string;
   paidAt?: Date | null;
   company?: CompanyInvoiceDetails;
+  /** Overrides for reusing this layout for a non-invoice document (e.g. a quote). */
+  documentLabel?: string; // default "INVOICE"
+  dueDateLabel?: string; // default "Due date"
 }
 
 const TEAL = "#2E5252";
@@ -84,7 +87,7 @@ export function generateInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
       .fillColor(CREAM)
       .font(F_DISPLAY)
       .fontSize(22)
-      .text("INVOICE", 0, 40, { width: pageW - 40, align: "right" });
+      .text(data.documentLabel ?? "INVOICE", 0, 40, { width: pageW - 40, align: "right" });
     doc
       .fillColor(GOLD)
       .font(F_BODY)
@@ -135,7 +138,7 @@ export function generateInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
     y += 78;
     doc.fillColor(TEXT_MUTED).font(F_BODY).fontSize(8.5);
     doc.text(`Issue date:  ${data.issueDate.toLocaleDateString("en-GB")}`, 40, y);
-    doc.text(`Due date:  ${data.dueDate.toLocaleDateString("en-GB")}`, 200, y);
+    doc.text(`${data.dueDateLabel ?? "Due date"}:  ${data.dueDate.toLocaleDateString("en-GB")}`, 200, y);
     if (data.paidAt) {
       doc.fillColor("#3F6B52").text(`Paid on ${data.paidAt.toLocaleDateString("en-GB")}`, 360, y, { width: 195, align: "right" });
     }

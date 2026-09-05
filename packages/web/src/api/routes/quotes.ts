@@ -3,8 +3,12 @@ import { db } from "../database";
 import { quotes, quoteItems, clients, invoices, invoiceItems } from "../database/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
-import { computeTotals } from "../lib/totals";
+import { computeTotals, vatBreakdownFromNet } from "../lib/totals";
 import { nextNumber } from "../lib/counters";
+import { generateInvoicePdf } from "../lib/invoice-pdf";
+import { buildQuoteEmailHtml } from "../lib/email-templates";
+import { sendTrackedEmail } from "../services/email-log";
+import { getCompanyInvoiceDetails } from "../lib/company";
 
 export const quotesRoute = new Hono()
   .get("/", requireAuth, async (c) => {
@@ -68,6 +72,88 @@ export const quotesRoute = new Hono()
     const { status } = await c.req.json();
     const [quote] = await db.update(quotes).set({ status }).where(eq(quotes.id, id)).returning();
     return c.json({ quote }, 200);
+  })
+  .get("/:id/pdf", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, id));
+    if (!quote) return c.json({ message: "Not found" }, 404);
+    const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, id));
+    const [client] = await db.select().from(clients).where(eq(clients.id, quote.clientId));
+
+    const vatBreakdown = vatBreakdownFromNet(items);
+    const company = await getCompanyInvoiceDetails();
+
+    const pdfBuffer = await generateInvoicePdf({
+      invoiceNumber: quote.quoteNumber,
+      issueDate: quote.issueDate,
+      dueDate: quote.validUntil ?? new Date(quote.issueDate.getTime() + 30 * 24 * 60 * 60 * 1000),
+      documentLabel: "QUOTE",
+      dueDateLabel: "Valid until",
+      client: {
+        name: client?.name ?? "Unknown",
+        address: client?.address,
+        zipCode: client?.zipCode,
+        city: client?.city,
+        country: client?.country,
+        phone: client?.phone,
+      },
+      items,
+      subtotal: quote.subtotal,
+      vatTotal: quote.vatTotal,
+      total: quote.total,
+      notes: quote.notes,
+      vatBreakdown,
+      status: quote.status,
+      company,
+    });
+
+    c.header("Content-Type", "application/pdf");
+    c.header("Content-Disposition", `attachment; filename="quote-${quote.quoteNumber}.pdf"`);
+    return c.body(new Uint8Array(pdfBuffer));
+  })
+  .post("/:id/send", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, id));
+    if (!quote) return c.json({ message: "Not found" }, 404);
+    if (quote.convertedInvoiceId) return c.json({ message: "Quote was already converted to an invoice" }, 400);
+    const items = await db.select().from(quoteItems).where(eq(quoteItems.quoteId, id));
+    const [client] = await db.select().from(clients).where(eq(clients.id, quote.clientId));
+    if (!client?.email) return c.json({ message: "Client has no email" }, 400);
+
+    const vatBreakdown = vatBreakdownFromNet(items);
+    const company = await getCompanyInvoiceDetails();
+
+    const pdfBuffer = await generateInvoicePdf({
+      invoiceNumber: quote.quoteNumber,
+      issueDate: quote.issueDate,
+      dueDate: quote.validUntil ?? new Date(quote.issueDate.getTime() + 30 * 24 * 60 * 60 * 1000),
+      documentLabel: "QUOTE",
+      dueDateLabel: "Valid until",
+      client,
+      items,
+      subtotal: quote.subtotal,
+      vatTotal: quote.vatTotal,
+      total: quote.total,
+      notes: quote.notes,
+      vatBreakdown,
+      status: quote.status,
+      company,
+    });
+
+    await sendTrackedEmail({
+      to: client.email,
+      recipientName: client.name,
+      clientId: client.id,
+      type: "quote",
+      subject: `Quote ${quote.quoteNumber} — Studio Daï Oakes`,
+      html: buildQuoteEmailHtml({ clientName: client.name, quoteNumber: quote.quoteNumber, total: quote.total, validUntil: quote.validUntil }),
+      attachments: [{ filename: `quote-${quote.quoteNumber}.pdf`, content: pdfBuffer }],
+    });
+
+    if (quote.status === "draft") {
+      await db.update(quotes).set({ status: "sent" }).where(eq(quotes.id, id));
+    }
+    return c.json({ success: true }, 200);
   })
   .post("/:id/convert", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));

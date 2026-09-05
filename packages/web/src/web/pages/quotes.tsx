@@ -8,7 +8,8 @@ import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
 import { SearchInput, SortableTh, EmptyRow, StatusFilter } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, cmpNumberLike, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { netToGross } from "../../api/lib/totals";
-import { Plus, X, ArrowRightCircle, Pencil, Trash2, Loader2 } from "lucide-react";
+import { Plus, X, ArrowRightCircle, Pencil, Trash2, Loader2, Send, Download, XCircle } from "lucide-react";
+import { downloadFile } from "../lib/download";
 
 export default function QuotesPage() {
   return (
@@ -65,6 +66,8 @@ function QuotesContent() {
   const [editId, setEditId] = useState<number | null>(null);
   const [clientId, setClientId] = useState<number | null>(null);
   const [items, setItems] = useState<LineItemDraft[]>([{ description: "", quantity: 1, unitPrice: 0, vatRate: 0.09 }]);
+  const [validUntil, setValidUntil] = useState("");
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [deletePendingId, setDeletePendingId] = useState<number | null>(null);
   const qc = useQueryClient();
@@ -106,7 +109,7 @@ function QuotesContent() {
 
   const createQuote = useMutation({
     mutationFn: async () => {
-      const res = await api.quotes.$post({ json: { clientId, items } });
+      const res = await api.quotes.$post({ json: { clientId, items, validUntil: validUntil || undefined } as any });
       return await res.json();
     },
     onSuccess: () => {
@@ -121,7 +124,7 @@ function QuotesContent() {
       const res = await fetch(`/api/quotes/${editId}/edit`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, items }),
+        body: JSON.stringify({ clientId, items, validUntil: validUntil || null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to update quote.");
@@ -164,9 +167,43 @@ function QuotesContent() {
     },
   });
 
+  const sendQuote = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await api.quotes[":id"].send.$post({ param: { id: String(id) } });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to send quote.");
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["quotes"] });
+      showToast("success", "Quote emailed to client.");
+    },
+    onError: (err: any) => showToast("error", err?.message ?? "Failed to send quote."),
+  });
+
+  const setStatus = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) => {
+      const res = await api.quotes[":id"].status.$put({ param: { id: String(id) }, json: { status } } as any);
+      return await res.json();
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["quotes"] }),
+  });
+
+  async function handleDownloadPdf(id: number, quoteNumber: string) {
+    setDownloadingId(id);
+    try {
+      await downloadFile(`/api/quotes/${id}/pdf`, `quote-${quoteNumber}.pdf`);
+    } catch (e: any) {
+      showToast("error", e?.message ?? "Failed to download PDF");
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
   function resetForm() {
     setClientId(null);
     setItems([{ description: "", quantity: 1, unitPrice: 0, vatRate: 0.09 }]);
+    setValidUntil("");
   }
 
   function openNewForm() {
@@ -182,6 +219,7 @@ function QuotesContent() {
       if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to load quote details.");
       setEditId(q.id);
       setClientId(data.client?.id ?? null);
+      setValidUntil(data.quote?.validUntil ? new Date(data.quote.validUntil).toISOString().slice(0, 10) : "");
       setItems(
         (data.items as QuoteDetailItem[] ?? []).map((i) => ({
           description: i.description,
@@ -299,8 +337,28 @@ function QuotesContent() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => handleDownloadPdf(q.id, q.quoteNumber)}
+                        disabled={downloadingId === q.id}
+                        className="text-muted-foreground hover:text-primary disabled:opacity-50"
+                        title="Download the quote PDF"
+                      >
+                        {downloadingId === q.id ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+                      </button>
                       {!q.convertedInvoiceId && (
                         <>
+                          <button
+                            onClick={() => sendQuote.mutate(q.id)}
+                            disabled={sendQuote.isPending && sendQuote.variables === q.id}
+                            className="text-muted-foreground hover:text-primary disabled:opacity-50"
+                            title="Email the quote to the client"
+                          >
+                            {sendQuote.isPending && sendQuote.variables === q.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Send className="size-4" />
+                            )}
+                          </button>
                           <button
                             onClick={() => openEditForm(q)}
                             className="text-muted-foreground hover:text-primary"
@@ -315,6 +373,15 @@ function QuotesContent() {
                           >
                             <ArrowRightCircle className="size-4" />
                           </button>
+                          {q.status !== "declined" && (
+                            <button
+                              onClick={() => setStatus.mutate({ id: q.id, status: "declined" })}
+                              className="text-muted-foreground hover:text-destructive"
+                              title="Mark as declined"
+                            >
+                              <XCircle className="size-4" />
+                            </button>
+                          )}
                         </>
                       )}
                       {q.convertedInvoiceId && (
@@ -365,6 +432,15 @@ function QuotesContent() {
                   </option>
                 ))}
             </select>
+            <div>
+              <label className="text-xs text-muted-foreground">Valid until (optional)</label>
+              <input
+                type="date"
+                value={validUntil}
+                onChange={(e) => setValidUntil(e.target.value)}
+                className="w-full h-10 px-3 mt-1 rounded-md border border-input bg-background text-sm"
+              />
+            </div>
             <LineItemEditor items={items} onChange={setItems} services={services} />
             <Button
               className="w-full"
