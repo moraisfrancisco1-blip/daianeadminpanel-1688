@@ -77,7 +77,12 @@ function CatalogContent() {
             .map((s: any) => (
             <div key={s.id} className={`bg-card border border-border rounded-xl p-5 flex items-start justify-between ${!s.active ? "opacity-50" : ""}`}>
               <div>
-                <h3 className="font-medium">{s.name}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-medium">{s.name}</h3>
+                  {s.groupLabel && (
+                    <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{s.groupLabel}</span>
+                  )}
+                </div>
                 {s.description && <p className="text-sm text-muted-foreground mt-0.5">{s.description}</p>}
                 <p className="text-sm text-muted-foreground mt-1">{s.durationMinutes} min</p>
                 {!s.active && <span className="text-xs text-destructive font-medium">Inactive</span>}
@@ -120,6 +125,7 @@ function CatalogContent() {
                 const fd = new FormData(e.currentTarget);
                 createService.mutate({
                   name: fd.get("name"),
+                  groupLabel: fd.get("groupLabel") || null,
                   description: fd.get("description"),
                   durationMinutes: Number(fd.get("durationMinutes")),
                   price: Number(fd.get("price")),
@@ -129,6 +135,7 @@ function CatalogContent() {
               className="space-y-3"
             >
               <input name="name" required placeholder="Service name" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <input name="groupLabel" placeholder="Category (optional, e.g. Massage)" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <input name="description" placeholder="Description" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <div className="grid grid-cols-2 gap-3">
                 <input name="durationMinutes" type="number" defaultValue={60} placeholder="Duration (min)" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
@@ -162,6 +169,7 @@ function CatalogContent() {
                   id: editingService.id,
                   data: {
                     name: fd.get("name"),
+                    groupLabel: fd.get("groupLabel") || null,
                     description: fd.get("description"),
                     durationMinutes: Number(fd.get("durationMinutes")),
                     price: Number(fd.get("price")),
@@ -174,6 +182,7 @@ function CatalogContent() {
               className="space-y-3"
             >
               <input name="name" required placeholder="Service name" defaultValue={editingService.name} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <input name="groupLabel" placeholder="Category (optional, e.g. Massage)" defaultValue={editingService.groupLabel ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <input name="description" placeholder="Description" defaultValue={editingService.description ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <div className="grid grid-cols-2 gap-3">
                 <input name="durationMinutes" type="number" defaultValue={editingService.durationMinutes} placeholder="Duration (min)" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
