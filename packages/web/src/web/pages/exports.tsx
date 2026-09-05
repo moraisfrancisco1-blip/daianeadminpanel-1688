@@ -24,6 +24,11 @@ function ExportsContent() {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
 
+  const [qYear, setQYear] = useState(now.getFullYear());
+  const [quarter, setQuarter] = useState(Math.floor(now.getMonth() / 3) + 1);
+  const [qDownloading, setQDownloading] = useState(false);
+  const [qError, setQError] = useState("");
+
   async function handleDownload() {
     setDownloading(true);
     setError("");
@@ -36,6 +41,18 @@ function ExportsContent() {
       setError(e?.message ?? "Download failed");
     } finally {
       setDownloading(false);
+    }
+  }
+
+  async function handleQuarterlyDownload() {
+    setQDownloading(true);
+    setQError("");
+    try {
+      await downloadFile(`/api/exports/quarterly?year=${qYear}&quarter=${quarter}`, `invoices-${qYear}-Q${quarter}.xlsx`);
+    } catch (e: any) {
+      setQError(e?.message ?? "Download failed");
+    } finally {
+      setQDownloading(false);
     }
   }
 
@@ -76,6 +93,35 @@ function ExportsContent() {
           Includes invoice number, client, dates, subtotal, VAT, total, status. For individual invoice PDFs, use the
           download icon on the Invoices page.
         </p>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-6 max-w-lg space-y-4">
+        <h3 className="font-medium">Quarterly Excel export</h3>
+        <p className="text-xs text-muted-foreground -mt-2">One file covering a full quarter, for BTW (VAT) filing.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <select
+            className="h-10 px-3 rounded-md border border-input bg-background text-sm"
+            value={quarter}
+            onChange={(e) => setQuarter(Number(e.target.value))}
+          >
+            {[1, 2, 3, 4].map((qtr) => (
+              <option key={qtr} value={qtr}>
+                Q{qtr}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            className="h-10 px-3 rounded-md border border-input bg-background text-sm"
+            value={qYear}
+            onChange={(e) => setQYear(Number(e.target.value))}
+          />
+        </div>
+        <Button className="w-full" onClick={handleQuarterlyDownload} disabled={qDownloading}>
+          {qDownloading ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+          {qDownloading ? "Downloading…" : "Download Excel"}
+        </Button>
+        {qError && <p className="text-sm text-destructive">{qError}</p>}
       </div>
     </div>
   );

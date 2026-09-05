@@ -5,13 +5,7 @@ import { eq, and, gte, lt, inArray } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { generateMonthlyExcel } from "../lib/excel-export";
 
-export const exportsRoute = new Hono().get("/monthly", requireAuth, async (c) => {
-  const year = Number(c.req.query("year") ?? new Date().getFullYear());
-  const month = Number(c.req.query("month") ?? new Date().getMonth() + 1); // 1-12
-
-  const start = new Date(year, month - 1, 1);
-  const end = new Date(year, month, 1);
-
+async function buildInvoiceExcel(start: Date, end: Date, label: string) {
   const rows = await db
     .select({
       invoiceId: invoices.id,
@@ -30,24 +24,23 @@ export const exportsRoute = new Hono().get("/monthly", requireAuth, async (c) =>
     .where(and(gte(invoices.issueDate, start), lt(invoices.issueDate, end)));
 
   const invoiceIds = rows.map((r) => r.invoiceId);
-  const monthRefunds = invoiceIds.length
+  const periodRefunds = invoiceIds.length
     ? await db.select().from(refunds).where(inArray(refunds.invoiceId, invoiceIds))
     : [];
   const refundedByInvoice = new Map<number, number>();
-  for (const r of monthRefunds) {
+  for (const r of periodRefunds) {
     if (r.status !== "succeeded") continue;
     refundedByInvoice.set(r.invoiceId, (refundedByInvoice.get(r.invoiceId) ?? 0) + r.amount);
   }
   const invoiceById = new Map(rows.map((r) => [r.invoiceId, r]));
 
-  const monthLabel = `${start.toLocaleString("en-GB", { month: "long" })} ${year}`;
-  const buffer = await generateMonthlyExcel(
+  return generateMonthlyExcel(
     rows.map((r) => ({
       ...r,
       clientName: r.clientName ?? "Unknown",
       refundedAmount: refundedByInvoice.get(r.invoiceId) ?? 0,
     })),
-    monthRefunds.map((r) => ({
+    periodRefunds.map((r) => ({
       invoiceNumber: invoiceById.get(r.invoiceId)?.invoiceNumber ?? `#${r.invoiceId}`,
       clientName: invoiceById.get(r.invoiceId)?.clientName ?? "Unknown",
       amount: r.amount,
@@ -55,10 +48,36 @@ export const exportsRoute = new Hono().get("/monthly", requireAuth, async (c) =>
       status: r.status,
       createdAt: r.createdAt,
     })),
-    monthLabel,
+    label,
   );
+}
 
-  c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  c.header("Content-Disposition", `attachment; filename="invoices-${year}-${String(month).padStart(2, "0")}.xlsx"`);
-  return c.body(new Uint8Array(buffer));
-});
+export const exportsRoute = new Hono()
+  .get("/monthly", requireAuth, async (c) => {
+    const year = Number(c.req.query("year") ?? new Date().getFullYear());
+    const month = Number(c.req.query("month") ?? new Date().getMonth() + 1); // 1-12
+
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 1);
+    const monthLabel = `${start.toLocaleString("en-GB", { month: "long" })} ${year}`;
+    const buffer = await buildInvoiceExcel(start, end, monthLabel);
+
+    c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    c.header("Content-Disposition", `attachment; filename="invoices-${year}-${String(month).padStart(2, "0")}.xlsx"`);
+    return c.body(new Uint8Array(buffer));
+  })
+  .get("/quarterly", requireAuth, async (c) => {
+    const year = Number(c.req.query("year") ?? new Date().getFullYear());
+    const quarter = Number(c.req.query("quarter") ?? Math.floor(new Date().getMonth() / 3) + 1); // 1-4
+    if (quarter < 1 || quarter > 4) return c.json({ message: "quarter must be 1-4" }, 400);
+
+    const startMonth = (quarter - 1) * 3;
+    const start = new Date(year, startMonth, 1);
+    const end = new Date(year, startMonth + 3, 1);
+    const label = `Q${quarter} ${year}`;
+    const buffer = await buildInvoiceExcel(start, end, label);
+
+    c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    c.header("Content-Disposition", `attachment; filename="invoices-${year}-Q${quarter}.xlsx"`);
+    return c.body(new Uint8Array(buffer));
+  });
