@@ -22,14 +22,21 @@ import { addressLookupRoute } from "./routes/address-lookup";
 import { smsRoute } from "./routes/sms";
 import { settingsRoute } from "./routes/settings";
 import { reportVoltWatchEvent } from "./services/volt-watch";
+import { rateLimitByIp } from "./lib/rate-limit";
 
 const app = new Hono()
   .use(cors({ origin: (origin) => origin ?? "*", credentials: true, exposeHeaders: ["set-auth-token"] }))
   // Public health endpoint used by VOLT CORE uptime monitoring. No customer data is exposed.
   .get("/api/health", (c) => c.json({ status: "ok", service: "daiane-oakes-admin" }, 200))
+  // Brute-force protection on the only login path into financial/health data —
+  // 10 attempts per 15 minutes per IP, regardless of outcome.
+  .use("/api/auth/sign-in/*", rateLimitByIp({ method: "POST", prefix: "login", limit: 10, windowMs: 15 * 60 * 1000 }))
   .on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
   // Stripe webhook must be registered BEFORE auth middleware (no auth required)
   .route("/api/stripe-webhook", stripeWebhookRoute)
+  // The public booking form has no login gate, so cap creates per IP —
+  // 20 per hour is generous for a real client, tight for a spam script.
+  .use("/api/bookings", rateLimitByIp({ method: "POST", prefix: "public-booking", limit: 20, windowMs: 60 * 60 * 1000 }))
   .basePath("api")
   .use("*", authMiddleware)
   .onError((err, c) => {

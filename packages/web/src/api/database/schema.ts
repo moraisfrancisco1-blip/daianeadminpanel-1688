@@ -362,4 +362,16 @@ export const companySettings = sqliteTable("company_settings", {
     .$defaultFn(() => new Date()),
 });
 
+// One row per request counted against a rate limit (e.g. "login:1.2.3.4",
+// "public-booking:1.2.3.4"). A window's hit count is just the number of rows
+// for that key newer than the window — old rows are pruned opportunistically
+// by the rate-limit check itself rather than a separate job.
+export const rateLimitHits = sqliteTable("rate_limit_hits", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  key: text("key").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export * from "./auth-schema";
