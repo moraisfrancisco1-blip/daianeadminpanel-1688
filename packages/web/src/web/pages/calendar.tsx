@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
@@ -105,7 +105,12 @@ export default function CalendarPage() {
 function CalendarContent() {
   const qc = useQueryClient();
   const [, navigateTo] = useLocation();
-  const [view, setView] = useState<"day" | "week" | "month">("week");
+  // Defaults to the single-day view on a phone-width screen — the week grid
+  // needs 720px and forces horizontal scrolling, which never feels native on
+  // an iPhone. Desktop keeps the week view it always had.
+  const [view, setView] = useState<"day" | "week" | "month">(() =>
+    typeof window !== "undefined" && window.innerWidth < 768 ? "day" : "week",
+  );
   const initialDateParam = new URLSearchParams(window.location.search).get("date");
   const [cursor, setCursor] = useState(() =>
     initialDateParam ? new Date(`${initialDateParam}T12:00:00`) : new Date(),
@@ -226,6 +231,21 @@ function CalendarContent() {
     }
   };
 
+  // Swipe left/right to move a day at a time — only wired up for the day view
+  // (the one phones default to); week/month stay button/tap-only like before.
+  const touchStartX = useRef<number | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0]?.clientX ?? null;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    touchStartX.current = null;
+    const SWIPE_THRESHOLD = 60;
+    if (Math.abs(dx) < SWIPE_THRESHOLD) return;
+    navigate(dx < 0 ? 1 : -1);
+  };
+
   const title = useMemo(() => {
     if (view === "month") return cursor.toLocaleString("en-GB", { month: "long", year: "numeric" });
     if (view === "day")
@@ -305,6 +325,7 @@ function CalendarContent() {
           }}
         />
       ) : (
+        <div onTouchStart={view === "day" ? onTouchStart : undefined} onTouchEnd={view === "day" ? onTouchEnd : undefined}>
         <TimeGrid
           view={view}
           cursor={cursor}
@@ -315,6 +336,7 @@ function CalendarContent() {
           onDeleteBlock={deleteBlock.mutate}
           onCreateBooking={(date, time) => navigateTo(`/bookings/manual?date=${date}&time=${time}`)}
         />
+        </div>
       )}
 
       {selectedBooking && (
@@ -354,8 +376,8 @@ function TimeGrid(props: {
   const height = (mins: number) => Math.max((mins / 60) * HOUR_HEIGHT, 22);
 
   return (
-    <div className="bg-card border border-border rounded-xl overflow-x-auto">
-      <div className="min-w-[720px]">
+    <div className={`bg-card border border-border rounded-xl ${view === "week" ? "overflow-x-auto" : ""}`}>
+      <div className={view === "week" ? "min-w-[720px]" : ""}>
         <div className="flex">
           <div className="w-12 shrink-0" />
           {days.map((day) => {
