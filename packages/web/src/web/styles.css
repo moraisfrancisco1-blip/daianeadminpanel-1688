@@ -132,3 +132,23 @@
     @apply bg-background text-foreground font-sans;
   }
 }
+
+/* iOS Safari auto-zooms the page when a focused form control has a computed
+   font-size under 16px — every form on this site uses text-sm (14px), so
+   without this every tap into a field on an iPhone jarringly zooms in and
+   has to be pinched back out. Scoped to touch-capable devices so desktop
+   sizing (which never triggers the zoom) is untouched. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Momentum scrolling for horizontally-scrollable tables on iOS — without it,
+   dragging a wide table on an iPhone feels sluggish/stuttery instead of the
+   native flick-and-glide feel. */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}

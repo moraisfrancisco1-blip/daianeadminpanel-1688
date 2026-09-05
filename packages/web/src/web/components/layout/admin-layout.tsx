@@ -192,7 +192,7 @@ function AvatarMenu({
   );
 }
 
-function NotificationsMenu() {
+function NotificationsMenu({ variant = "light" }: { variant?: "light" | "dark" }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const alerts = useQuery({
@@ -215,14 +215,25 @@ function NotificationsMenu() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="relative size-9 rounded-full flex items-center justify-center text-brand-teal hover:bg-accent transition-colors"
+        aria-label="Notifications"
+        className={cn(
+          "relative size-11 rounded-full flex items-center justify-center transition-colors",
+          variant === "dark" ? "text-brand-cream hover:bg-white/10" : "text-brand-teal hover:bg-accent",
+        )}
       >
         <Bell className="size-4.5" />
-        {items.length > 0 && <span className="absolute top-1.5 right-2 size-2 rounded-full bg-destructive" />}
+        {items.length > 0 && (
+          <span
+            className={cn(
+              "absolute top-2 right-2.5 size-2 rounded-full bg-destructive",
+              variant === "dark" && "ring-2 ring-brand-teal",
+            )}
+          />
+        )}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 rounded-lg border border-border bg-card shadow-lg py-1.5 z-50">
+        <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-card shadow-lg py-1.5 z-50">
           <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b border-border">
             Notifications
           </p>
@@ -263,11 +274,14 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex bg-background">
       {/* Mobile top bar */}
-      <div className="md:hidden fixed top-0 inset-x-0 h-14 bg-brand-teal flex items-center justify-between px-4 z-40">
-        <img src="/brand/logo.png" alt="Studio Daï Oakes" className="h-8 w-auto" />
-        <button onClick={() => setMobileOpen(true)} className="text-brand-cream p-1">
-          <Menu className="size-6" />
-        </button>
+      <div className="md:hidden fixed top-0 inset-x-0 h-14 bg-brand-teal flex items-center justify-between px-2 z-40">
+        <img src="/brand/logo.png" alt="Studio Daï Oakes" className="h-8 w-auto ml-2" />
+        <div className="flex items-center gap-0.5">
+          <NotificationsMenu variant="dark" />
+          <button onClick={() => setMobileOpen(true)} className="size-11 flex items-center justify-center text-brand-cream" aria-label="Open menu">
+            <Menu className="size-6" />
+          </button>
+        </div>
       </div>
 
       {/* Mobile drawer */}
@@ -275,9 +289,9 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
         <div className="md:hidden fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
           <aside className="absolute left-0 top-0 bottom-0 w-72 bg-gradient-to-b from-brand-teal to-brand-teal-dark flex flex-col">
-            <div className="px-6 py-6 border-b border-white/10 flex items-center justify-between">
+            <div className="pl-6 pr-2 py-4 border-b border-white/10 flex items-center justify-between">
               <img src="/brand/logo.png" alt="Studio Daï Oakes" className="w-full max-w-[150px] h-auto" />
-              <button onClick={() => setMobileOpen(false)} className="text-brand-cream shrink-0 ml-2">
+              <button onClick={() => setMobileOpen(false)} className="size-11 flex items-center justify-center text-brand-cream shrink-0" aria-label="Close menu">
                 <X className="size-5" />
               </button>
             </div>
@@ -294,9 +308,25 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
                   <p className="text-xs text-brand-cream/60 truncate">Founder &amp; Lead Therapist</p>
                 </div>
               </div>
+              <Link
+                to="/profile"
+                onClick={() => setMobileOpen(false)}
+                className="w-full mt-2 flex items-center gap-3 px-1 py-2.5 rounded-md text-sm font-medium text-brand-cream/70 hover:text-brand-cream transition-colors"
+              >
+                <User className="size-4" />
+                Profile
+              </Link>
+              <Link
+                to="/settings"
+                onClick={() => setMobileOpen(false)}
+                className="w-full flex items-center gap-3 px-1 py-2.5 rounded-md text-sm font-medium text-brand-cream/70 hover:text-brand-cream transition-colors"
+              >
+                <Settings className="size-4" />
+                Settings
+              </Link>
               <button
                 onClick={() => signOut().then(() => window.location.assign("/login"))}
-                className="w-full mt-3 flex items-center gap-3 px-1 py-2 rounded-md text-sm font-medium text-brand-cream/70 hover:text-brand-cream transition-colors"
+                className="w-full flex items-center gap-3 px-1 py-2.5 rounded-md text-sm font-medium text-brand-cream/70 hover:text-brand-cream transition-colors"
               >
                 <LogOut className="size-4" />
                 Sign out
