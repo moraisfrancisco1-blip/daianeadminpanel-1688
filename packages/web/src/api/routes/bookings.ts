@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { bookings, services, clients, invoices, invoiceItems, blockedSlots } from "../database/schema";
+import { bookings, services, clients, invoices, invoiceItems, blockedSlots, packages, packageUsages } from "../database/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { stripe } from "../services/stripe";
@@ -445,6 +445,22 @@ export const bookingsRoute = new Hono()
       )[0];
     }
 
+    // Paying with an existing session package skips the invoice entirely —
+    // validate it up front so a bad package never leaves behind a booking.
+    let usedPackage: typeof packages.$inferSelect | undefined;
+    if (body.packageId) {
+      [usedPackage] = await db.select().from(packages).where(eq(packages.id, Number(body.packageId)));
+      if (!usedPackage || usedPackage.clientId !== client!.id) {
+        return c.json({ message: "Package not found for this client" }, 400);
+      }
+      if (usedPackage.sessionsUsed >= usedPackage.totalSessions) {
+        return c.json({ message: "Package has no remaining sessions" }, 400);
+      }
+      if (usedPackage.expiresAt && usedPackage.expiresAt.getTime() < Date.now()) {
+        return c.json({ message: "Package has expired" }, 400);
+      }
+    }
+
     // Admin bookings aren't gated by location — it's recorded for reporting,
     // derived from the day the admin picked (Tue/Thu = Amsterdam).
     const location = locationForDay(new Date(`${body.date}T00:00:00`).getDay());
@@ -461,13 +477,18 @@ export const bookingsRoute = new Hono()
         startTime: body.startTime,
         location,
         status: "confirmed",
-        depositAmount: body.depositAmount ?? 0,
-        depositStatus: body.depositAmount ? "unpaid" : "paid",
+        depositAmount: usedPackage ? service.price : (body.depositAmount ?? 0),
+        depositStatus: usedPackage || body.depositAmount ? (usedPackage ? "paid" : "unpaid") : "paid",
         payFullNow: true,
-        paymentMethod: body.paymentMethod ?? null,
-        notes: body.notes ?? null,
+        paymentMethod: usedPackage ? "package" : (body.paymentMethod ?? null),
+        notes: usedPackage ? [body.notes, `Paid via package: ${usedPackage.name} (#${usedPackage.id})`].filter(Boolean).join(" — ") : (body.notes ?? null),
       })
       .returning();
+
+    if (usedPackage) {
+      await db.update(packages).set({ sessionsUsed: usedPackage.sessionsUsed + 1 }).where(eq(packages.id, usedPackage.id));
+      await db.insert(packageUsages).values({ packageId: usedPackage.id, bookingId: booking!.id, sessions: 1 });
+    }
 
     // Determine if this is truly a full payment or just a deposit
     const isFullPayment = booking!.depositAmount >= service.price;

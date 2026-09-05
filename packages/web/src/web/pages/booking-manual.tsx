@@ -46,6 +46,7 @@ function BookingManualContent() {
     startTime: initialTime,
     paymentMethod: "",
     generateInvoice: true,
+    packageId: null as number | null,
     notes: "",
     travelPrice: "",
     travelKm: "",
@@ -53,6 +54,20 @@ function BookingManualContent() {
     travelVatRate: "0.09",
   });
   const [showTravel, setShowTravel] = useState(false);
+
+  // Session packages the selected client can pay this booking with.
+  const clientPackagesQ = useQuery({
+    queryKey: ["client-packages", formData.clientId],
+    queryFn: async (): Promise<{ packages: { id: number; name: string; totalSessions: number; sessionsUsed: number; expiresAt: string | null }[] }> => {
+      const res = await api.clients[":id"].$get({ param: { id: String(formData.clientId) } });
+      const data = (await res.json()) as any;
+      return { packages: data.packages ?? [] };
+    },
+    enabled: formData.clientId != null,
+  });
+  const availablePackages = (clientPackagesQ.data?.packages ?? []).filter(
+    (p) => p.sessionsUsed < p.totalSessions && (!p.expiresAt || new Date(p.expiresAt).getTime() >= Date.now()),
+  );
 
   // Fetch services
   const services = useQuery({
@@ -103,6 +118,7 @@ function BookingManualContent() {
           startTime: data.startTime,
           paymentMethod: data.paymentMethod || null,
           generateInvoice: data.generateInvoice,
+          packageId: data.packageId ?? undefined,
           notes: data.notes || null,
           travelPrice: data.travelPrice ? Number(data.travelPrice) : undefined,
           travelKm: data.travelKm ? Number(data.travelKm) : undefined,
@@ -132,6 +148,7 @@ function BookingManualContent() {
         startTime: "",
         paymentMethod: "",
         generateInvoice: true,
+        packageId: null,
         notes: "",
         travelPrice: "",
         travelKm: "",
@@ -158,12 +175,13 @@ function BookingManualContent() {
       name: client.name,
       email: client.email ?? "",
       phone: client.phone ?? "",
+      packageId: null,
     }));
     setSearch("");
   };
 
   const handleCreateNew = () => {
-    setFormData((prev) => ({ ...prev, clientId: null }));
+    setFormData((prev) => ({ ...prev, clientId: null, packageId: null }));
     setSearch("");
   };
 
@@ -419,12 +437,36 @@ function BookingManualContent() {
           </h2>
 
           <div className="space-y-4">
+            {availablePackages.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Pay with session package</label>
+                <select
+                  value={formData.packageId ?? ""}
+                  onChange={(e) => setFormData({ ...formData, packageId: e.target.value ? Number(e.target.value) : null })}
+                  className="w-full px-4 py-2.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                >
+                  <option value="">Don't use a package</option>
+                  {availablePackages.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.totalSessions - p.sessionsUsed} left)
+                    </option>
+                  ))}
+                </select>
+                {formData.packageId != null && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    This session will be deducted from the package — no invoice will be generated for it.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium mb-1.5">Payment Method</label>
               <select
                 value={formData.paymentMethod}
                 onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })}
-                className="w-full px-4 py-2.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                disabled={formData.packageId != null}
+                className="w-full px-4 py-2.5 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
               >
                 <option value="">Select payment method</option>
                 <option value="cash">Cash</option>
@@ -441,7 +483,8 @@ function BookingManualContent() {
                   type="checkbox"
                   checked={formData.generateInvoice}
                   onChange={(e) => setFormData({ ...formData, generateInvoice: e.target.checked })}
-                  className="mt-0.5 size-4"
+                  disabled={formData.packageId != null}
+                  className="mt-0.5 size-4 disabled:opacity-50"
                 />
                 <span>
                   Generate an invoice automatically for the remaining balance
