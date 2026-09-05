@@ -32,6 +32,7 @@ const NAV_GROUPS = [
       { href: "/payment-control", label: "Payment Control" },
       { href: "/refunds", label: "Refunds" },
       { href: "/packages", label: "Packages" },
+      { href: "/expenses", label: "Expenses" },
     ],
   },
   {

@@ -14,6 +14,7 @@ import ExportsPage from "./pages/exports";
 import ReportsPage from "./pages/reports";
 import EmailHistoryPage from "./pages/email-history";
 import AuditLogPage from "./pages/audit-log";
+import ExpensesPage from "./pages/expenses";
 import PaymentControlPage from "./pages/payment-control";
 import RefundsPage from "./pages/refunds";
 import CalendarPage from "./pages/calendar";
@@ -50,6 +51,7 @@ function App() {
           <Route path="/exports" component={ExportsPage} />
           <Route path="/emails" component={EmailHistoryPage} />
           <Route path="/audit-log" component={AuditLogPage} />
+          <Route path="/expenses" component={ExpensesPage} />
           <Route path="/book" component={BookPage} />
           <Route path="/book/confirmed" component={BookConfirmedPage} />
           <Route path="/profile" component={ProfilePage} />
