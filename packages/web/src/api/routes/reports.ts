@@ -2,10 +2,53 @@ import { Hono } from "hono";
 import { db } from "../database";
 import { invoices, clients, bookings, invoiceItems, services } from "../database/schema";
 import { requireAuth } from "../middleware/auth";
+import { and, gte, lt, inArray, notInArray } from "drizzle-orm";
+import { vatBreakdownFromNet, round2 } from "../lib/totals";
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 
-export const reportsRoute = new Hono().get("/overview", requireAuth, async (c) => {
+export const reportsRoute = new Hono()
+  .get("/vat-quarterly", requireAuth, async (c) => {
+    const now = new Date();
+    const year = Number(c.req.query("year") ?? now.getFullYear());
+    const quarter = Number(c.req.query("quarter") ?? Math.floor(now.getMonth() / 3) + 1);
+    if (quarter < 1 || quarter > 4) return c.json({ message: "quarter must be 1-4" }, 400);
+
+    const startMonth = (quarter - 1) * 3;
+    const start = new Date(year, startMonth, 1);
+    const end = new Date(year, startMonth + 3, 1);
+
+    // VAT is owed once an invoice is issued/sent — draft invoices were never
+    // sent (no VAT event yet) and cancelled ones negate the original event.
+    const periodInvoices = await db
+      .select({ id: invoices.id })
+      .from(invoices)
+      .where(and(gte(invoices.issueDate, start), lt(invoices.issueDate, end), notInArray(invoices.status, ["draft", "cancelled"])));
+
+    const invoiceIds = periodInvoices.map((i) => i.id);
+    const items = invoiceIds.length
+      ? await db.select({ amount: invoiceItems.amount, vatRate: invoiceItems.vatRate }).from(invoiceItems).where(inArray(invoiceItems.invoiceId, invoiceIds))
+      : [];
+
+    const breakdown = vatBreakdownFromNet(items);
+    const totalNet = round2(breakdown.reduce((s, b) => s + b.base, 0));
+    const totalVat = round2(breakdown.reduce((s, b) => s + b.vat, 0));
+
+    return c.json(
+      {
+        year,
+        quarter,
+        label: `Q${quarter} ${year}`,
+        invoiceCount: invoiceIds.length,
+        breakdown: breakdown.sort((a, b) => b.rate - a.rate),
+        totalNet,
+        totalVat,
+        totalGross: round2(totalNet + totalVat),
+      },
+      200,
+    );
+  })
+  .get("/overview", requireAuth, async (c) => {
   const allInvoices = await db.select().from(invoices);
   const allClients = await db.select().from(clients);
   const allBookings = await db.select().from(bookings);
