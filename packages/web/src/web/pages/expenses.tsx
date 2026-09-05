@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
-import { Plus, Trash2, X, Loader2, Upload, Sparkles, Paperclip } from "lucide-react";
+import { Plus, Trash2, X, Loader2, Upload, Sparkles, Paperclip, Camera } from "lucide-react";
 
 type Expense = {
   id: number;
@@ -207,6 +207,7 @@ function ExpensesContent() {
 function ExpenseForm(props: { onClose: () => void; onSaved: () => void }) {
   const { onClose, onSaved } = props;
   const qc = useQueryClient();
+  const cameraRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [supplier, setSupplier] = useState("");
@@ -303,6 +304,21 @@ function ExpenseForm(props: { onClose: () => void; onSaved: () => void }) {
         <h2 className="font-display text-xl font-semibold">Add expense</h2>
 
         <div>
+          {/* `capture="environment"` opens the phone's camera directly instead of a
+              general photo/file picker — the closest a web page gets to "Adobe Scan".
+              Desktop browsers just ignore the attribute and fall back to a file picker. */}
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) scan.mutate(file);
+              e.target.value = "";
+            }}
+          />
           <input
             ref={fileRef}
             type="file"
@@ -311,28 +327,50 @@ function ExpenseForm(props: { onClose: () => void; onSaved: () => void }) {
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) scan.mutate(file);
+              e.target.value = "";
             }}
           />
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={scan.isPending}
-            className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-md border-2 border-dashed border-input text-sm font-medium text-muted-foreground hover:border-primary hover:text-primary disabled:opacity-50"
-          >
-            {scan.isPending ? (
-              <>
-                <Loader2 className="size-4 animate-spin" /> Scanning…
-              </>
-            ) : attachmentFilename ? (
-              <>
-                <Paperclip className="size-4" /> {attachmentFilename} (click to replace)
-              </>
-            ) : (
-              <>
-                <Upload className="size-4" /> Upload receipt (PDF/photo) — auto-fills the fields below
-              </>
-            )}
-          </button>
+
+          {attachmentFilename ? (
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={scan.isPending}
+              className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-md border-2 border-dashed border-input text-sm font-medium text-muted-foreground hover:border-primary hover:text-primary disabled:opacity-50"
+            >
+              {scan.isPending ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Scanning…
+                </>
+              ) : (
+                <>
+                  <Paperclip className="size-4" /> {attachmentFilename} (click to replace)
+                </>
+              )}
+            </button>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => cameraRef.current?.click()}
+                disabled={scan.isPending}
+                className="flex flex-col items-center justify-center gap-1.5 px-3 py-4 rounded-md border-2 border-dashed border-input text-sm font-medium text-muted-foreground hover:border-primary hover:text-primary disabled:opacity-50"
+              >
+                {scan.isPending ? <Loader2 className="size-5 animate-spin" /> : <Camera className="size-5" />}
+                Scan with camera
+              </button>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={scan.isPending}
+                className="flex flex-col items-center justify-center gap-1.5 px-3 py-4 rounded-md border-2 border-dashed border-input text-sm font-medium text-muted-foreground hover:border-primary hover:text-primary disabled:opacity-50"
+              >
+                <Upload className="size-5" />
+                Upload file
+              </button>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground mt-1.5">Auto-fills the fields below from the receipt — always double-check before saving.</p>
           {scanNote && (
             <p className="text-xs text-muted-foreground mt-1.5 flex items-start gap-1">
               <Sparkles className="size-3.5 shrink-0 mt-0.5" /> {scanNote}
