@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { invoices, clients, bookings, invoiceItems, services } from "../database/schema";
+import { invoices, clients, bookings, invoiceItems, services, expenses } from "../database/schema";
 import { requireAuth } from "../middleware/auth";
 import { and, gte, lt, inArray, notInArray } from "drizzle-orm";
 import { vatBreakdownFromNet, round2 } from "../lib/totals";
@@ -34,6 +34,16 @@ export const reportsRoute = new Hono()
     const totalNet = round2(breakdown.reduce((s, b) => s + b.base, 0));
     const totalVat = round2(breakdown.reduce((s, b) => s + b.vat, 0));
 
+    // Deductible input VAT: what the business paid on its own expenses this
+    // quarter (Vodafone, domain, ads, etc.), which nets against VAT collected.
+    const periodExpenses = await db
+      .select()
+      .from(expenses)
+      .where(and(gte(expenses.issueDate, start), lt(expenses.issueDate, end)));
+    const expenseBreakdown = vatBreakdownFromNet(periodExpenses.map((e) => ({ amount: e.netAmount, vatRate: e.vatRate })));
+    const expensesNet = round2(expenseBreakdown.reduce((s, b) => s + b.base, 0));
+    const expensesVat = round2(expenseBreakdown.reduce((s, b) => s + b.vat, 0));
+
     return c.json(
       {
         year,
@@ -44,6 +54,11 @@ export const reportsRoute = new Hono()
         totalNet,
         totalVat,
         totalGross: round2(totalNet + totalVat),
+        expenseCount: periodExpenses.length,
+        expenseBreakdown: expenseBreakdown.sort((a, b) => b.rate - a.rate),
+        expensesNet,
+        expensesVat,
+        vatPayable: round2(totalVat - expensesVat),
       },
       200,
     );

@@ -22,7 +22,23 @@ export interface RefundRow {
   createdAt: Date;
 }
 
-export async function generateMonthlyExcel(rows: InvoiceRow[], refundRows: RefundRow[], monthLabel: string): Promise<Buffer> {
+export interface ExpenseRow {
+  supplier: string;
+  category: string | null;
+  invoiceNumber: string | null;
+  issueDate: Date;
+  netAmount: number;
+  vatAmount: number;
+  totalAmount: number;
+  attachmentUrl: string | null;
+}
+
+export async function generateMonthlyExcel(
+  rows: InvoiceRow[],
+  refundRows: RefundRow[],
+  monthLabel: string,
+  expenseRows?: ExpenseRow[],
+): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const sheet = wb.addWorksheet(monthLabel);
 
@@ -98,6 +114,48 @@ export async function generateMonthlyExcel(rows: InvoiceRow[], refundRows: Refun
   }
   if (refundRows.length === 0) {
     refundSheet.addRow({ invoiceNumber: "", clientName: "No refunds this month", amount: "", reason: "", status: "", createdAt: "" });
+  }
+
+  if (expenseRows) {
+    const expenseSheet = wb.addWorksheet("Expenses");
+    expenseSheet.columns = [
+      { header: "Supplier", key: "supplier", width: 26 },
+      { header: "Category", key: "category", width: 16 },
+      { header: "Invoice #", key: "invoiceNumber", width: 16 },
+      { header: "Date", key: "issueDate", width: 14 },
+      { header: "Net (excl. VAT)", key: "netAmount", width: 16 },
+      { header: "VAT", key: "vatAmount", width: 12 },
+      { header: "Total (incl. VAT)", key: "totalAmount", width: 16 },
+      { header: "Receipt", key: "attachmentUrl", width: 40 },
+    ];
+    expenseSheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFB5652D" } };
+    expenseSheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    for (const e of expenseRows) {
+      expenseSheet.addRow({
+        supplier: e.supplier,
+        category: e.category ?? "",
+        invoiceNumber: e.invoiceNumber ?? "",
+        issueDate: e.issueDate.toLocaleDateString("en-GB"),
+        netAmount: Number(e.netAmount.toFixed(2)),
+        vatAmount: Number(e.vatAmount.toFixed(2)),
+        totalAmount: Number(e.totalAmount.toFixed(2)),
+        attachmentUrl: e.attachmentUrl ?? "",
+      });
+    }
+    const expenseTotalsRow = expenseSheet.addRow({
+      supplier: "TOTAL",
+      category: "",
+      invoiceNumber: "",
+      issueDate: "",
+      netAmount: Number(expenseRows.reduce((s, e) => s + e.netAmount, 0).toFixed(2)),
+      vatAmount: Number(expenseRows.reduce((s, e) => s + e.vatAmount, 0).toFixed(2)),
+      totalAmount: Number(expenseRows.reduce((s, e) => s + e.totalAmount, 0).toFixed(2)),
+      attachmentUrl: "",
+    });
+    expenseTotalsRow.font = { bold: true };
+    if (expenseRows.length === 0) {
+      expenseSheet.addRow({ supplier: "No expenses this period", category: "", invoiceNumber: "", issueDate: "", netAmount: "", vatAmount: "", totalAmount: "", attachmentUrl: "" });
+    }
   }
 
   const buffer = await wb.xlsx.writeBuffer();

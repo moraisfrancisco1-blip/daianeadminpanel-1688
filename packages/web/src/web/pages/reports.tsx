@@ -15,6 +15,11 @@ type VatQuarterly = {
   totalNet: number;
   totalVat: number;
   totalGross: number;
+  expenseCount: number;
+  expenseBreakdown: { rate: number; base: number; vat: number }[];
+  expensesNet: number;
+  expensesVat: number;
+  vatPayable: number;
 };
 
 export default function ReportsPage() {
@@ -207,8 +212,8 @@ function ReportsContent() {
                 <p className="text-lg font-display font-semibold">€{(vatQ.data?.totalNet ?? 0).toFixed(2)}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">VAT to pay</p>
-                <p className="text-lg font-display font-semibold text-brand-copper">€{(vatQ.data?.totalVat ?? 0).toFixed(2)}</p>
+                <p className="text-xs text-muted-foreground">VAT collected</p>
+                <p className="text-lg font-display font-semibold">€{(vatQ.data?.totalVat ?? 0).toFixed(2)}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Gross total</p>
@@ -219,8 +224,34 @@ function ReportsContent() {
                 <p className="text-lg font-display font-semibold">{vatQ.data?.invoiceCount ?? 0}</p>
               </div>
             </div>
+
+            <div className="flex flex-wrap gap-6 mt-4 pt-4 border-t border-border">
+              <div>
+                <p className="text-xs text-muted-foreground">Expenses (net)</p>
+                <p className="text-lg font-display font-semibold">€{(vatQ.data?.expensesNet ?? 0).toFixed(2)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">VAT paid (deductible)</p>
+                <p className="text-lg font-display font-semibold">€{(vatQ.data?.expensesVat ?? 0).toFixed(2)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Expenses counted</p>
+                <p className="text-lg font-display font-semibold">{vatQ.data?.expenseCount ?? 0}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-border">
+              <p className="text-xs text-muted-foreground">Net VAT payable (collected − deductible)</p>
+              <p className="text-2xl font-display font-semibold text-brand-copper">€{(vatQ.data?.vatPayable ?? 0).toFixed(2)}</p>
+            </div>
+
             <p className="text-xs text-muted-foreground mt-3">
-              Based on invoices issued in this quarter (excluding drafts and cancelled invoices) — matches the figures on the BTW aangifte.
+              Based on invoices issued in this quarter (excluding drafts and cancelled invoices) and expenses logged with a date in this
+              quarter — matches the figures on the BTW aangifte. Add expense receipts on the{" "}
+              <a href="/expenses" className="text-brand-teal underline">
+                Expenses
+              </a>{" "}
+              page.
             </p>
           </>
         )}

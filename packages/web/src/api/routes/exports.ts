@@ -1,11 +1,11 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { invoices, clients, refunds } from "../database/schema";
+import { invoices, clients, refunds, expenses } from "../database/schema";
 import { eq, and, gte, lt, inArray } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { generateMonthlyExcel } from "../lib/excel-export";
 
-async function buildInvoiceExcel(start: Date, end: Date, label: string) {
+async function buildInvoiceExcel(start: Date, end: Date, label: string, includeExpenses = false) {
   const rows = await db
     .select({
       invoiceId: invoices.id,
@@ -34,6 +34,19 @@ async function buildInvoiceExcel(start: Date, end: Date, label: string) {
   }
   const invoiceById = new Map(rows.map((r) => [r.invoiceId, r]));
 
+  const expenseRows = includeExpenses
+    ? (await db.select().from(expenses).where(and(gte(expenses.issueDate, start), lt(expenses.issueDate, end)))).map((e) => ({
+        supplier: e.supplier,
+        category: e.category,
+        invoiceNumber: e.invoiceNumber,
+        issueDate: e.issueDate,
+        netAmount: e.netAmount,
+        vatAmount: e.vatAmount,
+        totalAmount: e.totalAmount,
+        attachmentUrl: e.attachmentUrl,
+      }))
+    : undefined;
+
   return generateMonthlyExcel(
     rows.map((r) => ({
       ...r,
@@ -49,6 +62,7 @@ async function buildInvoiceExcel(start: Date, end: Date, label: string) {
       createdAt: r.createdAt,
     })),
     label,
+    expenseRows,
   );
 }
 
@@ -75,7 +89,7 @@ export const exportsRoute = new Hono()
     const start = new Date(year, startMonth, 1);
     const end = new Date(year, startMonth + 3, 1);
     const label = `Q${quarter} ${year}`;
-    const buffer = await buildInvoiceExcel(start, end, label);
+    const buffer = await buildInvoiceExcel(start, end, label, true);
 
     c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     c.header("Content-Disposition", `attachment; filename="invoices-${year}-Q${quarter}.xlsx"`);
