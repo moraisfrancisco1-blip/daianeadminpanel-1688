@@ -43,7 +43,9 @@ function SettingsContent() {
   const save = useMutation({
     mutationFn: async () => {
       const res = await api.settings.company.$put({ json: form } as any);
-      return (await res.json()) as { company: CompanyDetails };
+      const data = (await res.json()) as { company: CompanyDetails; message?: string };
+      if (!res.ok) throw new Error(data.message ?? "Could not save settings.");
+      return data;
     },
     onSuccess: (data) => {
       qc.setQueryData(["settings-company"], data);
@@ -114,6 +116,7 @@ function SettingsContent() {
             <input
               value={form.vat}
               onChange={(e) => set("vat", e.target.value)}
+              placeholder="NL123456789B01"
               className="w-full h-10 px-3 mt-1 rounded-md border border-input bg-background text-sm"
             />
           </div>
@@ -159,6 +162,7 @@ function SettingsContent() {
             {save.isPending ? "Saving…" : "Save"}
           </button>
           {saved && <span className="text-sm text-[#4C7A56]">Saved.</span>}
+          {save.isError && <span className="text-sm text-destructive">{(save.error as Error).message}</span>}
         </div>
       </div>
     </div>
