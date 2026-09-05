@@ -30,8 +30,14 @@ export function rateLimitByIp(opts: { method: string; prefix: string; limit: num
   return createMiddleware(async (c, next) => {
     if (c.req.method !== opts.method) return next();
     const ip = clientIp(c.req.raw.headers);
-    const allowed = await checkRateLimit(`${opts.prefix}:${ip}`, opts.limit, opts.windowMs);
-    if (!allowed) return c.json({ message: "Too many requests — please try again later." }, 429);
+    try {
+      const allowed = await checkRateLimit(`${opts.prefix}:${ip}`, opts.limit, opts.windowMs);
+      if (!allowed) return c.json({ message: "Too many requests — please try again later." }, 429);
+    } catch (err) {
+      // Fail OPEN: this is the login/booking path — a DB hiccup (or the
+      // migration not having run yet) must never lock out real users.
+      console.error("[rate-limit] check failed, allowing request:", err);
+    }
     return next();
   });
 }
