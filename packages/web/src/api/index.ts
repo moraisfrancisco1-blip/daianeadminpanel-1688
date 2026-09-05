@@ -21,6 +21,7 @@ import { messagesRoute } from "./routes/messages";
 import { addressLookupRoute } from "./routes/address-lookup";
 import { smsRoute } from "./routes/sms";
 import { settingsRoute } from "./routes/settings";
+import { auditLogRoute } from "./routes/audit-log";
 import { reportVoltWatchEvent } from "./services/volt-watch";
 import { rateLimitByIp } from "./lib/rate-limit";
 
@@ -71,7 +72,8 @@ const app = new Hono()
   .route("/address-lookup", addressLookupRoute)
   .route("/google-calendar", googleCalendarRoute)
   .route("/sms", smsRoute)
-  .route("/settings", settingsRoute);
+  .route("/settings", settingsRoute)
+  .route("/audit-log", auditLogRoute);
 
 export type AppType = typeof app;
 export default app;

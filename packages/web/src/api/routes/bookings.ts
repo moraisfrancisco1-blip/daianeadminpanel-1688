@@ -14,6 +14,7 @@ import { changeInvoiceStatus } from "../services/invoice-activity";
 import { createCalendarEvent, getGoogleBusyIntervals, deleteCalendarEvent, updateCalendarEvent } from "../services/google-calendar";
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 import { claimWebhookEvent, markWebhookEventProcessed, markWebhookEventFailed } from "../services/webhook-idempotency";
+import { recordAudit, actorFromContext } from "../lib/audit";
 
 const BUFFER_MIN = 0; // no artificial gap between sessions — only real overlap is blocked
 const SLOT_GRANULARITY_MIN = 15;
@@ -871,6 +872,13 @@ export const bookingsRoute = new Hono()
     }
     
     await db.delete(bookings).where(eq(bookings.id, id));
+    await recordAudit({
+      actor: actorFromContext(c),
+      action: "deleted",
+      entityType: "booking",
+      entityId: id,
+      metadata: booking ? { date: booking.date, startTime: booking.startTime, clientId: booking.clientId, status: booking.status } : undefined,
+    });
     return c.json({ success: true }, 200);
   })
   // Admin: one-off blocked time slots (unavailable periods)

@@ -3,6 +3,7 @@ import { db } from "../database";
 import { packages, packageUsages, clients } from "../database/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
+import { recordAudit, actorFromContext } from "../lib/audit";
 
 export const packagesRoute = new Hono()
   .get("/", requireAuth, async (c) => {
@@ -90,7 +91,15 @@ export const packagesRoute = new Hono()
   })
   .delete("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
+    const [pkg] = await db.select().from(packages).where(eq(packages.id, id));
     await db.delete(packageUsages).where(eq(packageUsages.packageId, id));
     await db.delete(packages).where(eq(packages.id, id));
+    await recordAudit({
+      actor: actorFromContext(c),
+      action: "deleted",
+      entityType: "package",
+      entityId: id,
+      metadata: pkg ? { name: pkg.name, clientId: pkg.clientId, sessionsUsed: pkg.sessionsUsed, totalSessions: pkg.totalSessions } : undefined,
+    });
     return c.json({ success: true }, 200);
   });

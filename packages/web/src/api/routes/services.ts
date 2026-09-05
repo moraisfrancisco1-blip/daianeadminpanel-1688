@@ -3,6 +3,7 @@ import { db } from "../database";
 import { services } from "../database/schema";
 import { eq, asc } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
+import { recordAudit, actorFromContext } from "../lib/audit";
 
 export const servicesRoute = new Hono()
   .get("/", async (c) => {
@@ -31,6 +32,7 @@ export const servicesRoute = new Hono()
   .put("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
     const body = await c.req.json();
+    const [existing] = await db.select().from(services).where(eq(services.id, id));
     const [service] = await db
       .update(services)
       .set({
@@ -45,10 +47,27 @@ export const servicesRoute = new Hono()
       })
       .where(eq(services.id, id))
       .returning();
+    if (existing && service && (existing.price !== service.price || existing.vatRate !== service.vatRate)) {
+      await recordAudit({
+        actor: actorFromContext(c),
+        action: "price_changed",
+        entityType: "service",
+        entityId: id,
+        metadata: { name: service.name, oldPrice: existing.price, newPrice: service.price, oldVatRate: existing.vatRate, newVatRate: service.vatRate },
+      });
+    }
     return c.json({ service }, 200);
   })
   .delete("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
+    const [existing] = await db.select().from(services).where(eq(services.id, id));
     await db.delete(services).where(eq(services.id, id));
+    await recordAudit({
+      actor: actorFromContext(c),
+      action: "deleted",
+      entityType: "service",
+      entityId: id,
+      metadata: existing ? { name: existing.name, price: existing.price } : undefined,
+    });
     return c.json({ success: true }, 200);
   });

@@ -4,6 +4,7 @@ import { companySettings } from "../database/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { getCompanyInvoiceDetails } from "../lib/company";
+import { recordAudit, actorFromContext } from "../lib/audit";
 
 export const settingsRoute = new Hono()
   .get("/company", requireAuth, async (c) => {
@@ -40,5 +41,12 @@ export const settingsRoute = new Hono()
     }
 
     const company = await getCompanyInvoiceDetails();
+    await recordAudit({
+      actor: actorFromContext(c),
+      action: "updated",
+      entityType: "settings",
+      entityId: "company",
+      metadata: values,
+    });
     return c.json({ company }, 200);
   });

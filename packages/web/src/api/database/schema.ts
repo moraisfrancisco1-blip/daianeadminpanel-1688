@@ -374,4 +374,21 @@ export const rateLimitHits = sqliteTable("rate_limit_hits", {
     .$defaultFn(() => new Date()),
 });
 
+// A trail of admin actions not already covered by the invoice-specific
+// invoiceActivity table above — deletions and edits to bookings, clients,
+// packages, quotes, services and settings, which previously left no record
+// of who did what.
+export const auditLog = sqliteTable("audit_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  actorUserId: text("actor_user_id"),
+  actorEmail: text("actor_email"),
+  action: text("action").notNull(), // e.g. "deleted", "updated", "price_changed"
+  entityType: text("entity_type").notNull(), // e.g. "booking", "package", "quote", "service", "settings"
+  entityId: text("entity_id"),
+  metadata: text("metadata"), // JSON-stringified details (before/after, etc.)
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export * from "./auth-schema";

@@ -9,6 +9,7 @@ import { generateInvoicePdf } from "../lib/invoice-pdf";
 import { buildQuoteEmailHtml } from "../lib/email-templates";
 import { sendTrackedEmail } from "../services/email-log";
 import { getCompanyInvoiceDetails } from "../lib/company";
+import { recordAudit, actorFromContext } from "../lib/audit";
 
 export const quotesRoute = new Hono()
   .get("/", requireAuth, async (c) => {
@@ -234,7 +235,15 @@ export const quotesRoute = new Hono()
   })
   .delete("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
+    const [quote] = await db.select().from(quotes).where(eq(quotes.id, id));
     await db.delete(quoteItems).where(eq(quoteItems.quoteId, id));
     await db.delete(quotes).where(eq(quotes.id, id));
+    await recordAudit({
+      actor: actorFromContext(c),
+      action: "deleted",
+      entityType: "quote",
+      entityId: id,
+      metadata: quote ? { quoteNumber: quote.quoteNumber, clientId: quote.clientId, total: quote.total, status: quote.status } : undefined,
+    });
     return c.json({ success: true }, 200);
   });

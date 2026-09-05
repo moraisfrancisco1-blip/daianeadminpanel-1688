@@ -43,7 +43,10 @@ const NAV_GROUPS = [
   },
   {
     label: "Data",
-    items: [{ href: "/exports", label: "Exports" }],
+    items: [
+      { href: "/exports", label: "Exports" },
+      { href: "/audit-log", label: "Audit Log" },
+    ],
   },
 ];
 
