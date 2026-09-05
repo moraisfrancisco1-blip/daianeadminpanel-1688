@@ -391,4 +391,26 @@ export const auditLog = sqliteTable("audit_log", {
     .$defaultFn(() => new Date()),
 });
 
+// Business expenses (Vodafone, domain/hosting, ads, etc.) — purchase invoices
+// the business receives, as opposed to `invoices` above which it issues.
+// Their VAT is deductible against what's collected on sales invoices, so the
+// quarterly VAT report/export needs both sides to compute what's actually owed.
+export const expenses = sqliteTable("expenses", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  supplier: text("supplier").notNull(),
+  category: text("category"), // e.g. Telecom, Software, Advertising, Domain/Hosting, Office, Travel, Other
+  invoiceNumber: text("invoice_number"),
+  issueDate: integer("issue_date", { mode: "timestamp" }).notNull(),
+  netAmount: real("net_amount").notNull(),
+  vatAmount: real("vat_amount").notNull().default(0),
+  vatRate: real("vat_rate").notNull().default(0.21),
+  totalAmount: real("total_amount").notNull(),
+  notes: text("notes"),
+  attachmentUrl: text("attachment_url"),
+  attachmentFilename: text("attachment_filename"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export * from "./auth-schema";
