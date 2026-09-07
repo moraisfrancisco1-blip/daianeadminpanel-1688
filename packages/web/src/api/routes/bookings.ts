@@ -19,14 +19,15 @@ import { recordAudit, actorFromContext } from "../lib/audit";
 const BUFFER_MIN = 0; // no artificial gap between sessions — only real overlap is blocked
 const SLOT_GRANULARITY_MIN = 15;
 
-type DaySchedule = {
+export type DaySchedule = {
   startMin: number;
   endMin: number;
   blocks: { startMin: number; endMin: number }[];
 };
 
 // Centralized per-day availability (Mon/Wed/Fri = Rotterdam studio, Tue/Thu = Amsterdam-only).
-const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
+// Exported for reuse in reports.ts's utilization-rate calculation.
+export const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
   1: { // Monday — block 09:00–10:00
     startMin: 9 * 60,
     endMin: 18 * 60,

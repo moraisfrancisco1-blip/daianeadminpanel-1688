@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
-import { Download } from "lucide-react";
+import { Download, Gauge, UserCheck, AlertCircle } from "lucide-react";
 
 type Monthly = { month: string; label: string; billed: number; paid: number; pending: number; sessions: number };
 type TopService = { name: string; revenue: number; count: number };
@@ -20,6 +20,19 @@ type VatQuarterly = {
   expensesNet: number;
   expensesVat: number;
   vatPayable: number;
+};
+type BusinessHealth = {
+  from: string;
+  to: string;
+  utilizationRate: number;
+  bookedHours: number;
+  availableHours: number;
+  noShowRate: number;
+  noShowCount: number;
+  decidedSessionCount: number;
+  retentionRate: number;
+  returningClients: number;
+  clientsWithSessions: number;
 };
 
 export default function ReportsPage() {
@@ -54,6 +67,19 @@ function ReportsContent() {
     queryKey: ["reports-vat-quarterly", vatYear, vatQuarter],
     queryFn: async (): Promise<VatQuarterly> => {
       const res = await api.reports["vat-quarterly"].$get({ query: { year: String(vatYear), quarter: String(vatQuarter) } } as any);
+      return (await res.json()) as any;
+    },
+  });
+
+  const [healthDays, setHealthDays] = useState(30);
+  const healthQ = useQuery({
+    queryKey: ["reports-business-health", healthDays],
+    queryFn: async (): Promise<BusinessHealth> => {
+      const from = new Date();
+      from.setDate(from.getDate() - healthDays);
+      const to = new Date();
+      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      const res = await api.reports["business-health"].$get({ query: { from: iso(from), to: iso(to) } } as any);
       return (await res.json()) as any;
     },
   });
@@ -97,6 +123,68 @@ function ReportsContent() {
         <StatBox label="Received (12m)" value={`€${(d?.monthly.reduce((s, m) => s + m.paid, 0) ?? 0).toFixed(2)}`} tone="green" />
         <StatBox label="Clients (total)" value={String(d?.totalClients ?? 0)} />
         <StatBox label="New clients (month)" value={String(d?.newClientsThisMonth ?? 0)} />
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-6">
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+          <h3 className="font-medium">Business health</h3>
+          <select
+            value={healthDays}
+            onChange={(e) => setHealthDays(Number(e.target.value))}
+            className="h-8 px-2 rounded-md border border-input bg-background text-xs"
+          >
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+          </select>
+        </div>
+        {healthQ.isLoading ? (
+          <div className="h-20 rounded-lg bg-muted animate-pulse" />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="flex items-start gap-3">
+              <span className="shrink-0 size-9 rounded-full bg-brand-teal/12 text-brand-teal flex items-center justify-center">
+                <Gauge className="size-4" />
+              </span>
+              <div>
+                <p className="text-xs text-muted-foreground">Utilization</p>
+                <p className="text-xl font-display font-semibold">{healthQ.data?.utilizationRate ?? 0}%</p>
+                <p className="text-xs text-muted-foreground">
+                  {healthQ.data?.bookedHours ?? 0}h booked of {healthQ.data?.availableHours ?? 0}h available
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="shrink-0 size-9 rounded-full bg-[#AE4F3F]/12 text-[#AE4F3F] flex items-center justify-center">
+                <AlertCircle className="size-4" />
+              </span>
+              <div>
+                <p className="text-xs text-muted-foreground">No-show rate</p>
+                <p className="text-xl font-display font-semibold">{healthQ.data?.noShowRate ?? 0}%</p>
+                <p className="text-xs text-muted-foreground">
+                  {healthQ.data?.noShowCount ?? 0} of {healthQ.data?.decidedSessionCount ?? 0} sessions
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="shrink-0 size-9 rounded-full bg-[#3F6B52]/12 text-[#3F6B52] flex items-center justify-center">
+                <UserCheck className="size-4" />
+              </span>
+              <div>
+                <p className="text-xs text-muted-foreground">Retention</p>
+                <p className="text-xl font-display font-semibold">{healthQ.data?.retentionRate ?? 0}%</p>
+                <p className="text-xs text-muted-foreground">
+                  {healthQ.data?.returningClients ?? 0} of {healthQ.data?.clientsWithSessions ?? 0} clients came back
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground mt-4 pt-4 border-t border-border">
+          Utilization compares booked hours against the studio's recurring weekly schedule (Mon/Wed/Fri Rotterdam,
+          Tue/Thu Amsterdam) over the selected period. Retention looks across all-time completed sessions, not just
+          this period.
+        </p>
       </div>
 
       <div className="bg-card border border-border rounded-xl overflow-hidden">

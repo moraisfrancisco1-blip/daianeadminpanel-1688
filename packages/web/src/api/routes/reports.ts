@@ -2,12 +2,93 @@ import { Hono } from "hono";
 import { db } from "../database";
 import { invoices, clients, bookings, invoiceItems, services, expenses } from "../database/schema";
 import { requireAuth } from "../middleware/auth";
-import { and, gte, lt, inArray, notInArray } from "drizzle-orm";
+import { and, eq, gte, lt, inArray, notInArray } from "drizzle-orm";
 import { vatBreakdownFromNet, round2 } from "../lib/totals";
+import { WEEKLY_SCHEDULE } from "./bookings";
+
+/** Minutes of scheduled availability for one calendar day, per the recurring weekly schedule. */
+function availableMinutesForDate(dateStr: string): number {
+  const day = new Date(`${dateStr}T00:00:00`).getDay();
+  const schedule = WEEKLY_SCHEDULE[day];
+  if (!schedule) return 0;
+  const totalMin = schedule.endMin - schedule.startMin;
+  const blockedMin = schedule.blocks.reduce((s, b) => s + (b.endMin - b.startMin), 0);
+  return Math.max(0, totalMin - blockedMin);
+}
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 
 export const reportsRoute = new Hono()
+  .get("/business-health", requireAuth, async (c) => {
+    const toISODate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const now = new Date();
+    const defaultFrom = new Date(now);
+    defaultFrom.setDate(defaultFrom.getDate() - 30);
+    const fromDate = c.req.query("from") ?? toISODate(defaultFrom);
+    const to = c.req.query("to") ?? toISODate(now);
+
+    const periodBookings = await db
+      .select({ id: bookings.id, date: bookings.date, status: bookings.status, serviceId: bookings.serviceId })
+      .from(bookings)
+      .where(and(gte(bookings.date, fromDate), inArray(bookings.status, ["confirmed", "completed", "no_show", "cancelled"])));
+    const relevantBookings = periodBookings.filter((b) => b.date <= to);
+
+    const allServices = await db.select().from(services);
+    const durationById = new Map(allServices.map((s) => [s.id, s.durationMinutes]));
+
+    // Utilization: booked minutes (confirmed/completed) vs. the studio's
+    // recurring weekly availability over the same date range.
+    const bookedMinutes = relevantBookings
+      .filter((b) => b.status === "confirmed" || b.status === "completed")
+      .reduce((sum, b) => sum + (durationById.get(b.serviceId ?? -1) ?? 60), 0);
+
+    let availableMinutes = 0;
+    const cursor = new Date(`${fromDate}T00:00:00`);
+    const rangeEnd = new Date(`${to}T00:00:00`);
+    while (cursor <= rangeEnd) {
+      availableMinutes += availableMinutesForDate(toISODate(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    const utilizationRate = availableMinutes > 0 ? round2((bookedMinutes / availableMinutes) * 100) : 0;
+
+    // No-show rate: only counts sessions whose outcome is already known
+    // (completed or no-show) — future confirmed bookings aren't decided yet.
+    const decidedBookings = relevantBookings.filter((b) => b.status === "completed" || b.status === "no_show");
+    const noShowCount = decidedBookings.filter((b) => b.status === "no_show").length;
+    const noShowRate = decidedBookings.length > 0 ? round2((noShowCount / decidedBookings.length) * 100) : 0;
+
+    // Retention: of clients who've had at least one completed session ever,
+    // what share have had more than one (i.e. came back).
+    const allCompletedBookings = await db
+      .select({ clientId: bookings.clientId, email: bookings.email })
+      .from(bookings)
+      .where(eq(bookings.status, "completed"));
+    const sessionsByClient = new Map<string, number>();
+    for (const b of allCompletedBookings) {
+      const key = b.clientId != null ? `id:${b.clientId}` : `email:${b.email}`;
+      sessionsByClient.set(key, (sessionsByClient.get(key) ?? 0) + 1);
+    }
+    const clientsWithSessions = sessionsByClient.size;
+    const returningClients = [...sessionsByClient.values()].filter((n) => n >= 2).length;
+    const retentionRate = clientsWithSessions > 0 ? round2((returningClients / clientsWithSessions) * 100) : 0;
+
+    return c.json(
+      {
+        from: fromDate,
+        to,
+        utilizationRate,
+        bookedHours: round2(bookedMinutes / 60),
+        availableHours: round2(availableMinutes / 60),
+        noShowRate,
+        noShowCount,
+        decidedSessionCount: decidedBookings.length,
+        retentionRate,
+        returningClients,
+        clientsWithSessions,
+      },
+      200,
+    );
+  })
   .get("/vat-quarterly", requireAuth, async (c) => {
     const now = new Date();
     const year = Number(c.req.query("year") ?? now.getFullYear());
