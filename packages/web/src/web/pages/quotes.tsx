@@ -13,7 +13,7 @@ import { downloadFile } from "../lib/download";
 
 export default function QuotesPage() {
   return (
-    <Protected>
+    <Protected adminOnly>
       <QuotesContent />
     </Protected>
   );

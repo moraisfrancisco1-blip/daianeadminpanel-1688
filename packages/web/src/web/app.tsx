@@ -23,6 +23,7 @@ import PackagesPage from "./pages/packages";
 import BookPage from "./pages/book";
 import ProfilePage from "./pages/profile";
 import SettingsPage from "./pages/settings";
+import TeamPage from "./pages/team";
 import { Provider } from "./components/provider";
 import { AgentFeedback } from "@runablehq/website-runtime";
 
@@ -56,6 +57,7 @@ function App() {
           <Route path="/book/confirmed" component={BookConfirmedPage} />
           <Route path="/profile" component={ProfilePage} />
           <Route path="/settings" component={SettingsPage} />
+          <Route path="/team" component={TeamPage} />
         </Switch>
       </ErrorBoundary>
       {/* Do not remove — off by default, activated by parent iframe via postMessage */}

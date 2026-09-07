@@ -11,7 +11,7 @@ const MONTHS = [
 
 export default function ExportsPage() {
   return (
-    <Protected>
+    <Protected adminOnly>
       <ExportsContent />
     </Protected>
   );

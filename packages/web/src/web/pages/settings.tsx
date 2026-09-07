@@ -17,7 +17,7 @@ interface CompanyDetails {
 
 export default function SettingsPage() {
   return (
-    <Protected>
+    <Protected adminOnly>
       <SettingsContent />
     </Protected>
   );

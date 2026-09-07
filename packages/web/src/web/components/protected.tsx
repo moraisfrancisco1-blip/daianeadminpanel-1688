@@ -3,13 +3,15 @@ import { useLocation } from "wouter";
 import { useSession } from "../lib/auth-client";
 import { AdminLayout } from "./layout/admin-layout";
 
-export function Protected({ children }: { children: React.ReactNode }) {
+export function Protected({ children, adminOnly }: { children: React.ReactNode; adminOnly?: boolean }) {
   const { data: session, isPending } = useSession();
   const [, navigate] = useLocation();
+  const isStaff = (session?.user as { role?: string | null } | undefined)?.role === "staff";
 
   useEffect(() => {
     if (!isPending && !session) navigate("/login");
-  }, [isPending, session, navigate]);
+    else if (!isPending && adminOnly && isStaff) navigate("/");
+  }, [isPending, session, adminOnly, isStaff, navigate]);
 
   if (isPending) {
     return (
@@ -19,6 +21,7 @@ export function Protected({ children }: { children: React.ReactNode }) {
     );
   }
   if (!session) return null;
+  if (adminOnly && isStaff) return null;
 
   return <AdminLayout>{children}</AdminLayout>;
 }

@@ -16,6 +16,14 @@ export const user = sqliteTable("user", {
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
+  // better-auth "admin" plugin — "admin" (full access) or "staff" (day-to-day
+  // operations only; gated server-side in middleware/auth.ts's requireAdmin).
+  role: text("role"),
+  banned: integer("banned", { mode: "boolean" }).default(false),
+  banReason: text("ban_reason"),
+  banExpires: integer("ban_expires", { mode: "timestamp_ms" }),
+  // better-auth "twoFactor" plugin.
+  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).default(false),
 });
 
 export const session = sqliteTable(
@@ -35,6 +43,8 @@ export const session = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    // better-auth "admin" plugin — set while an admin is impersonating another user.
+    impersonatedBy: text("impersonated_by"),
   },
   (table) => [index("session_userId_idx").on(table.userId)],
 );
@@ -85,6 +95,21 @@ export const verification = sqliteTable(
       .notNull(),
   },
   (table) => [index("verification_identifier_idx").on(table.identifier)],
+);
+
+// better-auth "twoFactor" plugin — one row per user with 2FA enabled.
+export const twoFactor = sqliteTable(
+  "two_factor",
+  {
+    id: text("id").primaryKey(),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    verified: integer("verified", { mode: "boolean" }).default(true),
+  },
+  (table) => [index("two_factor_userId_idx").on(table.userId)],
 );
 
 export const userRelations = relations(user, ({ many }) => ({

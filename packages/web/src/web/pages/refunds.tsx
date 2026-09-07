@@ -46,7 +46,7 @@ function fmtDate(iso: string | null): string {
 
 export default function RefundsPage() {
   return (
-    <Protected>
+    <Protected adminOnly>
       <RefundsContent />
     </Protected>
   );

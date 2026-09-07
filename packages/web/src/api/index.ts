@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { auth } from "./auth";
-import { authMiddleware } from "./middleware/auth";
+import { authMiddleware, requireAdmin } from "./middleware/auth";
 import { clientsRoute } from "./routes/clients";
 import { servicesRoute } from "./routes/services";
 import { quotesRoute } from "./routes/quotes";
@@ -41,6 +41,29 @@ const app = new Hono()
   .use("/api/bookings", rateLimitByIp({ method: "POST", prefix: "public-booking", limit: 20, windowMs: 60 * 60 * 1000 }))
   .basePath("api")
   .use("*", authMiddleware)
+  // Financial/settings routes are admin-only — a "staff" account (e.g. an
+  // assistant or another therapist) can run day-to-day operations (clients,
+  // calendar, bookings, packages, messages) but not see money or change config.
+  // Both the exact base path and its subpaths are registered — Hono's "/x/*"
+  // wildcard does not match the bare "/x" with no trailing segment.
+  .use("/invoices", requireAdmin)
+  .use("/invoices/*", requireAdmin)
+  .use("/quotes", requireAdmin)
+  .use("/quotes/*", requireAdmin)
+  .use("/payment-control", requireAdmin)
+  .use("/payment-control/*", requireAdmin)
+  .use("/refunds", requireAdmin)
+  .use("/refunds/*", requireAdmin)
+  .use("/expenses", requireAdmin)
+  .use("/expenses/*", requireAdmin)
+  .use("/exports", requireAdmin)
+  .use("/exports/*", requireAdmin)
+  .use("/reports", requireAdmin)
+  .use("/reports/*", requireAdmin)
+  .use("/settings", requireAdmin)
+  .use("/settings/*", requireAdmin)
+  .use("/audit-log", requireAdmin)
+  .use("/audit-log/*", requireAdmin)
   .onError((err, c) => {
     console.error("[api error]", err);
     reportVoltWatchEvent({

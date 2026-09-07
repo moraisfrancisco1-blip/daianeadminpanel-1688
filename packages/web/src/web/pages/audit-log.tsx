@@ -44,7 +44,7 @@ function summarize(entry: AuditEntry): string {
 
 export default function AuditLogPage() {
   return (
-    <Protected>
+    <Protected adminOnly>
       <AuditLogContent />
     </Protected>
   );

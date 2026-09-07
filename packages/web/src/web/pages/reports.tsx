@@ -24,7 +24,7 @@ type VatQuarterly = {
 
 export default function ReportsPage() {
   return (
-    <Protected>
+    <Protected adminOnly>
       <ReportsContent />
     </Protected>
   );

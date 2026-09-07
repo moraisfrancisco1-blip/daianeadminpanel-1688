@@ -67,7 +67,7 @@ function downscaleImageIfNeeded(file: File): Promise<File> {
 
 export default function ExpensesPage() {
   return (
-    <Protected>
+    <Protected adminOnly>
       <ExpensesContent />
     </Protected>
   );

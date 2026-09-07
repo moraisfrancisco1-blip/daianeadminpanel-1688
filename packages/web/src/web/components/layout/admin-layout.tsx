@@ -6,12 +6,15 @@ import { useSession, signOut } from "../../lib/auth-client";
 import { cn } from "../../lib/utils";
 import { api } from "../../lib/api";
 
+// adminOnly items are hidden for a "staff" account — enforcement is server-side
+// (requireAdmin in api/index.ts, and better-auth's own admin-plugin checks for
+// /team); this list only controls what's shown in the nav.
 const NAV_GROUPS = [
   {
     label: "Overview",
     items: [
       { href: "/", label: "Dashboard" },
-      { href: "/reports", label: "Reports" },
+      { href: "/reports", label: "Reports", adminOnly: true },
     ],
   },
   {
@@ -27,12 +30,12 @@ const NAV_GROUPS = [
     label: "Billing",
     items: [
       { href: "/catalog", label: "Catalog" },
-      { href: "/quotes", label: "Quotes" },
-      { href: "/invoices", label: "Invoices" },
-      { href: "/payment-control", label: "Payment Control" },
-      { href: "/refunds", label: "Refunds" },
+      { href: "/quotes", label: "Quotes", adminOnly: true },
+      { href: "/invoices", label: "Invoices", adminOnly: true },
+      { href: "/payment-control", label: "Payment Control", adminOnly: true },
+      { href: "/refunds", label: "Refunds", adminOnly: true },
       { href: "/packages", label: "Packages" },
-      { href: "/expenses", label: "Expenses" },
+      { href: "/expenses", label: "Expenses", adminOnly: true },
     ],
   },
   {
@@ -45,8 +48,9 @@ const NAV_GROUPS = [
   {
     label: "Data",
     items: [
-      { href: "/exports", label: "Exports" },
-      { href: "/audit-log", label: "Audit Log" },
+      { href: "/exports", label: "Exports", adminOnly: true },
+      { href: "/audit-log", label: "Audit Log", adminOnly: true },
+      { href: "/team", label: "Team", adminOnly: true },
     ],
   },
 ];
@@ -66,15 +70,20 @@ function greetingNow(): string {
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const [location] = useLocation();
+  const { data: session } = useSession();
+  const isStaff = (session?.user as { role?: string | null } | undefined)?.role === "staff";
   return (
     <>
-      {NAV_GROUPS.map((group) => (
+      {NAV_GROUPS.map((group) => {
+        const items = group.items.filter((item) => !("adminOnly" in item && item.adminOnly && isStaff));
+        if (items.length === 0) return null;
+        return (
         <div key={group.label} className="mb-5">
           <p className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-brand-gold/60">
             {group.label}
           </p>
           <div className="space-y-0.5">
-            {group.items.map(({ href, label }) => {
+            {items.map(({ href, label }) => {
               const active = location === href;
               return (
                 <Link
@@ -103,7 +112,8 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             })}
           </div>
         </div>
-      ))}
+        );
+      })}
     </>
   );
 }

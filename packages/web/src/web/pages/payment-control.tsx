@@ -56,7 +56,7 @@ function fmtDate(iso: string | null): string {
 
 export default function PaymentControlPage() {
   return (
-    <Protected>
+    <Protected adminOnly>
       <PaymentControlContent />
     </Protected>
   );

@@ -14,7 +14,7 @@ import { downloadFile } from "../lib/download";
 
 export default function InvoicesPage() {
   return (
-    <Protected>
+    <Protected adminOnly>
       <InvoicesContent />
     </Protected>
   );

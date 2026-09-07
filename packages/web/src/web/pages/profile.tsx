@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { Protected } from "../components/protected";
 import { authClient, useSession } from "../lib/auth-client";
-import { User, Lock, Camera, Save, Loader2 } from "lucide-react";
+import { User, Lock, Camera, Save, Loader2, ShieldCheck, ShieldOff, X } from "lucide-react";
+import QRCode from "qrcode";
 
 const AVATAR_SIZE = 256;
 
@@ -53,6 +54,11 @@ function ProfileContent() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordMsg, setPasswordMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const [show2faSetup, setShow2faSetup] = useState(false);
+  const [disablePassword, setDisablePassword] = useState("");
+  const [disabling, setDisabling] = useState(false);
+  const [disableMsg, setDisableMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const currentName = session?.user?.name ?? "";
   const currentImage = (session?.user as { image?: string | null } | undefined)?.image ?? null;
@@ -122,6 +128,28 @@ function ProfileContent() {
       setPasswordMsg({ ok: false, text: err?.message ?? "Failed to change password." });
     } finally {
       setPasswordSaving(false);
+    }
+  }
+
+  const twoFactorEnabled = !!(session?.user as { twoFactorEnabled?: boolean } | undefined)?.twoFactorEnabled;
+
+  async function disable2fa() {
+    setDisableMsg(null);
+    if (!disablePassword) {
+      setDisableMsg({ ok: false, text: "Enter your password to disable two-factor authentication." });
+      return;
+    }
+    setDisabling(true);
+    try {
+      const { error } = await authClient.twoFactor.disable({ password: disablePassword });
+      if (error) throw new Error(error.message ?? "Failed to disable two-factor authentication.");
+      await refetch();
+      setDisablePassword("");
+      setDisableMsg({ ok: true, text: "Two-factor authentication disabled." });
+    } catch (err: any) {
+      setDisableMsg({ ok: false, text: err?.message ?? "Failed to disable two-factor authentication." });
+    } finally {
+      setDisabling(false);
     }
   }
 
@@ -219,6 +247,207 @@ function ProfileContent() {
             <p className={`text-sm ${passwordMsg.ok ? "text-[#4C7A56]" : "text-destructive"}`}>{passwordMsg.text}</p>
           )}
         </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-6">
+        <h3 className="font-medium mb-1 flex items-center gap-2">
+          {twoFactorEnabled ? (
+            <ShieldCheck className="size-4 text-[#4C7A56]" />
+          ) : (
+            <ShieldOff className="size-4 text-brand-copper" />
+          )}
+          Two-factor authentication
+        </h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          {twoFactorEnabled
+            ? "Enabled — a code from your authenticator app is required at every sign-in."
+            : "Adds a second step at sign-in using an authenticator app (Google Authenticator, Authy, 1Password, etc.)."}
+        </p>
+        {twoFactorEnabled ? (
+          <div className="space-y-2 max-w-sm">
+            <input
+              type="password"
+              placeholder="Current password"
+              value={disablePassword}
+              onChange={(e) => setDisablePassword(e.target.value)}
+              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+            />
+            <button
+              onClick={disable2fa}
+              disabled={disabling}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border border-destructive text-destructive hover:bg-destructive/10 disabled:opacity-50"
+            >
+              {disabling && <Loader2 className="size-3.5 animate-spin" />} Disable two-factor authentication
+            </button>
+            {disableMsg && (
+              <p className={`text-sm ${disableMsg.ok ? "text-[#4C7A56]" : "text-destructive"}`}>{disableMsg.text}</p>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={() => setShow2faSetup(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90"
+          >
+            <ShieldCheck className="size-4" /> Enable two-factor authentication
+          </button>
+        )}
+      </div>
+
+      {show2faSetup && (
+        <TwoFactorSetupModal
+          onClose={() => setShow2faSetup(false)}
+          onEnabled={() => {
+            setShow2faSetup(false);
+            refetch();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function TwoFactorSetupModal(props: { onClose: () => void; onEnabled: () => void }) {
+  const { onClose, onEnabled } = props;
+  const [step, setStep] = useState<"password" | "scan" | "confirm">("password");
+  const [password, setPassword] = useState("");
+  const [totpUri, setTotpUri] = useState("");
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const manualSecret = (() => {
+    try {
+      return new URL(totpUri).searchParams.get("secret") ?? "";
+    } catch {
+      return "";
+    }
+  })();
+
+  async function startEnable() {
+    setError("");
+    if (!password) {
+      setError("Enter your password.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, error } = await authClient.twoFactor.enable({ password });
+      if (error) throw new Error(error.message ?? "Failed to start two-factor setup.");
+      const uri = (data as { totpURI?: string })?.totpURI ?? "";
+      const codes = (data as { backupCodes?: string[] })?.backupCodes ?? [];
+      setTotpUri(uri);
+      setBackupCodes(codes);
+      setQrDataUrl(uri ? await QRCode.toDataURL(uri, { width: 220 }) : "");
+      setStep("scan");
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to start two-factor setup.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function confirmCode() {
+    setError("");
+    if (!code) {
+      setError("Enter the 6-digit code from your authenticator app.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await authClient.twoFactor.verifyTotp({ code });
+      if (error) throw new Error(error.message ?? "Invalid code — check the app and try again.");
+      onEnabled();
+    } catch (err: any) {
+      setError(err?.message ?? "Invalid code — check the app and try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-card rounded-xl p-6 w-full max-w-sm space-y-4 relative">
+        <button onClick={onClose} className="absolute top-4 right-4 text-muted-foreground">
+          <X className="size-4" />
+        </button>
+        <h2 className="font-display text-xl font-semibold">Enable two-factor authentication</h2>
+
+        {step === "password" && (
+          <>
+            <p className="text-sm text-muted-foreground">Confirm your password to continue.</p>
+            <input
+              type="password"
+              placeholder="Current password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+            />
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <button
+              onClick={startEnable}
+              disabled={loading}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
+            >
+              {loading && <Loader2 className="size-4 animate-spin" />} Continue
+            </button>
+          </>
+        )}
+
+        {step === "scan" && (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Scan this with your authenticator app (Google Authenticator, Authy, 1Password, etc.), or enter the code manually.
+            </p>
+            {qrDataUrl && <img src={qrDataUrl} alt="Two-factor QR code" className="mx-auto rounded-md border border-border" />}
+            {manualSecret && (
+              <p className="text-xs text-center text-muted-foreground break-all font-mono bg-secondary/50 rounded-md px-2 py-1.5">
+                {manualSecret}
+              </p>
+            )}
+            <div className="bg-secondary/40 rounded-md p-3">
+              <p className="text-xs font-medium mb-1.5">Backup codes — save these somewhere safe</p>
+              <p className="text-xs text-muted-foreground mb-2">
+                Use one of these to sign in if you ever lose access to your authenticator app. Each works once.
+              </p>
+              <div className="grid grid-cols-2 gap-1 font-mono text-xs">
+                {backupCodes.map((c) => (
+                  <span key={c}>{c}</span>
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={() => setStep("confirm")}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90"
+            >
+              I've saved these — continue
+            </button>
+          </>
+        )}
+
+        {step === "confirm" && (
+          <>
+            <p className="text-sm text-muted-foreground">Enter the 6-digit code from your app to confirm it's working.</p>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm tracking-widest text-center"
+              placeholder="123456"
+            />
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <button
+              onClick={confirmCode}
+              disabled={loading}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
+            >
+              {loading && <Loader2 className="size-4 animate-spin" />} Confirm and enable
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
