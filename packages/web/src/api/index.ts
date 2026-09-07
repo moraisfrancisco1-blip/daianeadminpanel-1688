@@ -25,6 +25,7 @@ import { auditLogRoute } from "./routes/audit-log";
 import { expensesRoute } from "./routes/expenses";
 import { reportVoltWatchEvent } from "./services/volt-watch";
 import { rateLimitByIp } from "./lib/rate-limit";
+import { servicePaymentControlRoute } from "./routes/service/payment-control";
 
 const app = new Hono()
   .use(cors({ origin: (origin) => origin ?? "*", credentials: true, exposeHeaders: ["set-auth-token"] }))
@@ -36,6 +37,12 @@ const app = new Hono()
   .on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
   // Stripe webhook must be registered BEFORE auth middleware (no auth required)
   .route("/api/stripe-webhook", stripeWebhookRoute)
+  // Volt Core service connector (Round 1: Payment Control, read-only). Also
+  // registered before authMiddleware — it has its own auth (X-Volt-Core-Key)
+  // and must never fall under the human-session/admin-role checks below.
+  // Brute-force protection on the key itself, same treatment as human login.
+  .use("/api/service/*", rateLimitByIp({ method: "GET", prefix: "service-key", limit: 30, windowMs: 15 * 60 * 1000 }))
+  .route("/api/service/payment-control", servicePaymentControlRoute)
   // The public booking form has no login gate, so cap creates per IP —
   // 20 per hour is generous for a real client, tight for a spam script.
   .use("/api/bookings", rateLimitByIp({ method: "POST", prefix: "public-booking", limit: 20, windowMs: 60 * 60 * 1000 }))
