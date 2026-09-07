@@ -18,6 +18,8 @@ import {
   Save,
   Undo2,
   PackageIcon,
+  MessageCircle,
+  History,
 } from "lucide-react";
 import { StatusPill } from "../components/status-pill";
 
@@ -58,6 +60,7 @@ type ClientPackage = {
   expiresAt: string | null;
   purchasedAt: string;
 };
+type TimelineEntry = { date: string; type: string; title: string; detail: string; status?: string };
 
 export default function ClientDetailPage() {
   return (
@@ -74,6 +77,7 @@ function ClientDetailContent() {
   const [newNote, setNewNote] = useState("");
   const clinicalNotesRef = useRef<HTMLTextAreaElement>(null);
   const [clinicalNotesSaved, setClinicalNotesSaved] = useState(false);
+  const [timelineFilter, setTimelineFilter] = useState<string>("all");
 
   const q = useQuery({
     queryKey: ["client", id],
@@ -85,6 +89,7 @@ function ClientDetailContent() {
       bookings: Booking[];
       notes: ClientNote[];
       packages: ClientPackage[];
+      timeline: TimelineEntry[];
     }> => {
       const res = await api.clients[":id"].$get({ param: { id } });
       return (await res.json()) as any;
@@ -143,7 +148,7 @@ function ClientDetailContent() {
   }
   if (!q.data) return <p className="text-muted-foreground">Client not found.</p>;
 
-  const { client, invoices, quotes, payments, bookings, notes, packages } = q.data;
+  const { client, invoices, quotes, payments, bookings, notes, packages, timeline } = q.data;
   const pendingNotes = notes.filter((n) => !n.resolved);
   const resolvedNotes = notes.filter((n) => n.resolved);
 
@@ -204,6 +209,8 @@ function ClientDetailContent() {
           {nextSession && <p className="text-xs text-muted-foreground">{nextSession.startTime} · {nextSession.serviceName ?? "—"}</p>}
         </div>
       </div>
+
+      <ClientTimeline timeline={timeline} filter={timelineFilter} onFilterChange={setTimelineFilter} />
 
       {client.notes && (
         <div className="bg-card border border-border rounded-xl p-5">
@@ -519,6 +526,92 @@ function ClientDetailContent() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+const TIMELINE_FILTERS = [
+  { value: "all", label: "All" },
+  { value: "invoice", label: "Invoices" },
+  { value: "quote", label: "Quotes" },
+  { value: "payment", label: "Payments" },
+  { value: "booking", label: "Sessions" },
+  { value: "note", label: "Notes" },
+  { value: "package", label: "Packages" },
+  { value: "email", label: "Emails" },
+  { value: "message", label: "Messages" },
+];
+
+const TIMELINE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
+  invoice: Receipt,
+  quote: FileText,
+  payment: Euro,
+  booking: CalendarClock,
+  note: StickyNote,
+  package: PackageIcon,
+  email: Mail,
+  message: MessageCircle,
+};
+
+const TIMELINE_COLOR: Record<string, string> = {
+  invoice: "bg-brand-copper/15 text-brand-copper",
+  quote: "bg-brand-teal/15 text-brand-teal",
+  payment: "bg-[#3F6B52]/15 text-[#3F6B52]",
+  booking: "bg-brand-bronze/15 text-brand-bronze",
+  note: "bg-amber-500/15 text-amber-600",
+  package: "bg-purple-500/15 text-purple-600",
+  email: "bg-sky-500/15 text-sky-600",
+  message: "bg-emerald-500/15 text-emerald-600",
+};
+
+function ClientTimeline(props: { timeline: TimelineEntry[]; filter: string; onFilterChange: (v: string) => void }) {
+  const { timeline, filter, onFilterChange } = props;
+  const filtered = filter === "all" ? timeline : timeline.filter((e) => e.type === filter);
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-5">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <h3 className="font-medium flex items-center gap-2">
+          <History className="size-4 text-brand-copper" /> Timeline
+        </h3>
+        <select
+          value={filter}
+          onChange={(e) => onFilterChange(e.target.value)}
+          className="h-8 px-2 rounded-md border border-input bg-background text-xs"
+        >
+          {TIMELINE_FILTERS.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {filtered.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nothing here yet.</p>
+      ) : (
+        <div className="space-y-0 max-h-[420px] overflow-y-auto pr-1">
+          {filtered.map((entry, i) => {
+            const Icon = TIMELINE_ICON[entry.type] ?? History;
+            return (
+              <div key={i} className="flex items-start gap-3 py-2.5 border-t border-border first:border-t-0">
+                <span className={`shrink-0 size-7 rounded-full flex items-center justify-center ${TIMELINE_COLOR[entry.type] ?? "bg-secondary text-muted-foreground"}`}>
+                  <Icon className="size-3.5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium truncate">{entry.title}</p>
+                    <p className="text-xs text-muted-foreground shrink-0">{new Date(entry.date).toLocaleDateString("en-GB")}</p>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <p className="text-xs text-muted-foreground truncate">{entry.detail}</p>
+                    {entry.status && <StatusPill status={entry.status} />}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

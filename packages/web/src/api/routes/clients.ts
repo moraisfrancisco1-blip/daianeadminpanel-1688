@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../database";
-import { clients, invoices, bookings, payments, quotes, services, clientNotes, packages } from "../database/schema";
+import { clients, invoices, bookings, payments, quotes, services, clientNotes, packages, emailLog, messageLog } from "../database/schema";
 import { eq, desc, inArray, or } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { createStripeCustomer, updateStripeCustomer, findStripeCustomerByEmail } from "../services/stripe-sync";
@@ -64,6 +64,40 @@ export const clientsRoute = new Hono()
       .where(eq(packages.clientId, id))
       .orderBy(desc(packages.purchasedAt));
 
+    const clientEmails = await db.select().from(emailLog).where(eq(emailLog.clientId, id));
+    const clientMessages = await db.select().from(messageLog).where(eq(messageLog.clientId, id));
+
+    // A single chronological feed across every touchpoint with this client —
+    // otherwise the history is scattered across five separate tables/pages.
+    type TimelineEntry = { date: string; type: string; title: string; detail: string; status?: string };
+    const timeline: TimelineEntry[] = [];
+
+    for (const inv of clientInvoices) {
+      timeline.push({ date: inv.issueDate.toISOString(), type: "invoice", title: `Invoice ${inv.invoiceNumber}`, detail: `€${inv.total.toFixed(2)}`, status: inv.status });
+    }
+    for (const q of clientQuotes) {
+      timeline.push({ date: q.issueDate.toISOString(), type: "quote", title: `Quote ${q.quoteNumber}`, detail: `€${q.total.toFixed(2)}`, status: q.status });
+    }
+    for (const p of clientPayments) {
+      timeline.push({ date: p.paidAt.toISOString(), type: "payment", title: "Payment received", detail: `€${p.amount.toFixed(2)} · ${p.method}` });
+    }
+    for (const b of clientBookings) {
+      timeline.push({ date: new Date(`${b.date}T${b.startTime}:00`).toISOString(), type: "booking", title: b.serviceName ?? "Session", detail: `${b.date} at ${b.startTime}`, status: b.status });
+    }
+    for (const n of clientNotesList) {
+      timeline.push({ date: n.createdAt.toISOString(), type: "note", title: "Follow-up note", detail: n.content, status: n.resolved ? "resolved" : "pending" });
+    }
+    for (const pkg of clientPackages) {
+      timeline.push({ date: pkg.purchasedAt.toISOString(), type: "package", title: `Package: ${pkg.name}`, detail: `${pkg.totalSessions} sessions · €${pkg.price.toFixed(2)}` });
+    }
+    for (const e of clientEmails) {
+      timeline.push({ date: e.createdAt.toISOString(), type: "email", title: e.subject, detail: `Email · ${e.type}`, status: e.status });
+    }
+    for (const m of clientMessages) {
+      timeline.push({ date: m.createdAt.toISOString(), type: "message", title: m.body.length > 80 ? `${m.body.slice(0, 80)}…` : m.body, detail: `${m.channel}`, status: m.status });
+    }
+    timeline.sort((a, b) => b.date.localeCompare(a.date));
+
     return c.json(
       {
         client,
@@ -73,6 +107,7 @@ export const clientsRoute = new Hono()
         bookings: clientBookings,
         notes: clientNotesList,
         packages: clientPackages,
+        timeline,
       },
       200,
     );
