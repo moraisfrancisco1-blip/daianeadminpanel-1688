@@ -64,4 +64,4 @@ bun run db:migrate     # Run migrations
 bun run db:studio      # Open Drizzle Studio
 ```
 
-<!-- redeploy trigger 1784738979 -->
+<!-- redeploy trigger 1789065837 -->
