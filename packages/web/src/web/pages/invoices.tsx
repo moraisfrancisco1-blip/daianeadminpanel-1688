@@ -697,6 +697,7 @@ function InvoiceHistoryModal({ invoice, onClose }: { invoice: InvoiceRow; onClos
   const EMAIL_TYPE_LABEL: Record<string, string> = {
     invoice: "invoice",
     payment_link: "payment link",
+    payment_confirmation: "payment confirmation",
     booking_confirmation: "booking confirmation",
     reminder: "reminder",
     cancellation: "cancellation",

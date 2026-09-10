@@ -379,8 +379,8 @@ export const bookingsRoute = new Hono()
           quantity: 1,
         },
       ],
-      success_url: `${origin}/book/confirmed?booking=${booking!.id}`,
-      cancel_url: `${origin}/book?cancelled=1`,
+      success_url: `${origin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/payment-cancelled`,
       metadata: { bookingId: String(booking!.id) },
     });
 
@@ -832,8 +832,8 @@ export const bookingsRoute = new Hono()
           quantity: 1,
         },
       ],
-      success_url: `${origin}/book/confirmed?booking=${booking.id}`,
-      cancel_url: `${origin}/bookings`,
+      success_url: `${origin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/payment-cancelled`,
       metadata: { bookingId: String(booking.id), type: "remainder" },
     });
     

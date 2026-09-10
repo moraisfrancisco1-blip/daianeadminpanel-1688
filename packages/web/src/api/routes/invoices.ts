@@ -72,8 +72,8 @@ async function getOrCreateCheckoutUrl(invoice: any, client: any, origin: string)
         quantity: 1,
       },
     ],
-    success_url: `${origin}/invoices`,
-    cancel_url: `${origin}/invoices`,
+    success_url: `${origin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/payment-cancelled`,
     customer: customerId,
     metadata,
     // Propagate metadata to the PaymentIntent so payment_intent.succeeded can also

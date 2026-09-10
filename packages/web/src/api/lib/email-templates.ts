@@ -363,6 +363,56 @@ export function buildAdminInvoicePaidHtml(opts: {
   `);
 }
 
+// ============================================================================
+// PAYMENT CONFIRMATION (sent to the client once Stripe confirms the payment)
+// ============================================================================
+export function buildPaymentConfirmationHtml(opts: {
+  clientName: string;
+  invoiceNumber: string;
+  amount: number;
+  serviceName?: string | null;
+  date?: string | null;
+  startTime?: string | null;
+  hasBooking: boolean;
+}) {
+  const firstName = opts.clientName.split(" ")[0] || opts.clientName;
+  const when =
+    opts.date && opts.startTime
+      ? `${formatBookingDate(opts.date)} at ${opts.startTime}`
+      : opts.date
+        ? formatBookingDate(opts.date)
+        : null;
+
+  return wrapper(`
+    <p>Dear ${firstName},</p>
+    <p><strong style="color:${TEAL};">Payment received ✅</strong></p>
+    <p>Thank you — we've successfully received your payment of <strong>€${opts.amount.toFixed(2)}</strong> for invoice <strong>${opts.invoiceNumber}</strong>.</p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:18px 0;background:${CREAM};border-radius:6px;">
+      <tr>
+        <td style="padding:10px 14px;color:#6B6259;">Invoice</td>
+        <td style="padding:10px 14px;text-align:right;font-weight:600;">${opts.invoiceNumber}</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 14px;color:#6B6259;">Amount paid</td>
+        <td style="padding:10px 14px;text-align:right;font-weight:600;">€${opts.amount.toFixed(2)}</td>
+      </tr>
+      ${opts.serviceName ? `<tr>
+        <td style="padding:10px 14px;color:#6B6259;">Service</td>
+        <td style="padding:10px 14px;text-align:right;font-weight:600;">${opts.serviceName}</td>
+      </tr>` : ""}
+      ${when ? `<tr>
+        <td style="padding:10px 14px;color:#6B6259;">Appointment</td>
+        <td style="padding:10px 14px;text-align:right;font-weight:600;">${when}</td>
+      </tr>` : ""}
+    </table>
+
+    ${opts.hasBooking ? `<p>Your appointment is confirmed. A reminder will follow closer to the date.</p>` : `<p>Your payment is confirmed.</p>`}
+    <p>If you have any questions, just reply to this email — we're always happy to help.</p>
+    <p style="color:${COPPER};font-style:italic;">— Studio Daï Oakes</p>
+  `);
+}
+
 export function buildRebookReminderEmailHtml(opts: { name: string }) {
   return wrapper(`
     <h2 style="color:${TEAL};font-size:20px;margin:0 0 12px;">Olá ${opts.name} 👋</h2>

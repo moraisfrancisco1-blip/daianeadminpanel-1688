@@ -3,12 +3,12 @@ import Stripe from "stripe";
 import { stripe } from "../services/stripe";
 import { syncStripeCustomerToLocal, findClientByStripeCustomerId, syncStripeInvoiceStatus, findInvoiceByStripeInvoiceId } from "../services/stripe-sync";
 import { db } from "../database";
-import { clients, invoices, bookings, services, invoiceItems, payments, refunds } from "../database/schema";
-import { eq } from "drizzle-orm";
+import { clients, invoices, bookings, services, invoiceItems, payments, refunds, emailLog } from "../database/schema";
+import { eq, and } from "drizzle-orm";
 import { nextNumber } from "../lib/counters";
 import { computeVat, DEFAULT_VAT_RATE } from "../lib/totals";
 import { invoiceDescriptionForService } from "../lib/invoice-description";
-import { buildBookingConfirmationHtml, buildAdminNewBookingHtml } from "../lib/email-templates";
+import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildPaymentConfirmationHtml } from "../lib/email-templates";
 import { sendTrackedEmail } from "../services/email-log";
 import { changeInvoiceStatus, recordInvoiceActivity } from "../services/invoice-activity";
 import { COMPANY } from "../lib/company";
@@ -27,6 +27,93 @@ async function recordStripePayment(paymentIntentId: string, invoiceId: number, a
     .values({ invoiceId, amount, method: "stripe", paidAt, stripePaymentIntentId: paymentIntentId })
     .onConflictDoNothing();
   return true;
+}
+
+/**
+ * Client-facing "Payment received" confirmation for an Admin invoice.
+ *
+ * Idempotency (FASE 8) is enforced by the CALLER: this is only invoked when
+ * recordStripePayment() returned `created === true`, i.e. the first time this
+ * Stripe PaymentIntent is recorded (unique stripe_payment_intent_id). Because
+ * both checkout.session.completed and payment_intent.succeeded can fire for the
+ * same payment, and only ONE of them wins the insert, exactly one confirmation
+ * email is produced — webhook retries never duplicate it.
+ *
+ * Uses the existing tracked-email pipeline (sendTrackedEmail -> email_log), so
+ * the message shows up in Email History. A provider failure is logged to
+ * email_log by sendTrackedEmail and swallowed here so it can never roll back or
+ * fail the (already committed) financial processing.
+ */
+async function sendInvoicePaymentConfirmationEmail(invoiceId: number, amountPaid: number): Promise<void> {
+  const [invoice] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
+  if (!invoice) return;
+
+  const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
+  if (!client?.email) return;
+
+  // Secondary idempotency guard (FASE 8): the primary gate is the caller's
+  // `created` flag (unique PaymentIntent id). This email_log check is a
+  // belt-and-suspenders backstop so that even if two webhook events for the
+  // same payment were ever processed concurrently, only ONE "payment
+  // confirmation" is ever delivered for a given invoice.
+  const [alreadySent] = await db
+    .select({ id: emailLog.id })
+    .from(emailLog)
+    .where(
+      and(
+        eq(emailLog.invoiceId, invoiceId),
+        eq(emailLog.type, "payment_confirmation"),
+        eq(emailLog.status, "sent"),
+      ),
+    );
+  if (alreadySent) {
+    console.log("[stripe-webhook] Payment confirmation email already sent for invoice, skipping:", invoiceId);
+    return;
+  }
+
+  // Service / appointment details come from the linked booking when present.
+  let serviceName: string | null = null;
+  let date: string | null = null;
+  let startTime: string | null = null;
+  if (invoice.bookingId) {
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, invoice.bookingId));
+    if (booking) {
+      date = booking.date;
+      startTime = booking.startTime;
+      const [service] = await db.select().from(services).where(eq(services.id, booking.serviceId));
+      serviceName = service?.name ?? null;
+    }
+  }
+  // Fall back to the first invoice line description when there is no booking.
+  if (!serviceName) {
+    const [item] = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoice.id));
+    serviceName = item?.description ?? null;
+  }
+
+  try {
+    await sendTrackedEmail({
+      to: client.email,
+      recipientName: client.name,
+      clientId: client.id,
+      invoiceId: invoice.id,
+      bookingId: invoice.bookingId ?? null,
+      type: "payment_confirmation",
+      subject: "Payment received — Studio Daï Oakes",
+      html: buildPaymentConfirmationHtml({
+        clientName: client.name,
+        invoiceNumber: invoice.invoiceNumber,
+        amount: amountPaid,
+        serviceName,
+        date,
+        startTime,
+        hasBooking: !!invoice.bookingId,
+      }),
+    });
+  } catch (err) {
+    // Already recorded as "failed" in email_log by sendTrackedEmail. Never let a
+    // notification failure fail the webhook (the payment itself is committed).
+    console.error("[stripe-webhook] Failed to send payment confirmation email:", err);
+  }
 }
 
 // Raw body parser for Stripe webhook signature verification
@@ -312,6 +399,11 @@ stripeWebhookRoute.post("/", async (c) => {
               method: "stripe",
               metadata: { paymentIntentId: pi.id },
             });
+            // FASE 7/8 — client "Payment received" email. This event and
+            // checkout.session.completed both race to record the same payment;
+            // only the winner gets `created === true`, so exactly one email is
+            // sent and Stripe retries never duplicate it.
+            await sendInvoicePaymentConfirmationEmail(invoiceId, amount);
           }
           break;
         }
@@ -416,6 +508,10 @@ stripeWebhookRoute.post("/", async (c) => {
                   method: "stripe",
                   metadata: { paymentIntentId, checkoutSessionId: session.id },
                 });
+                // FASE 7/8 — client "Payment received" email. Gated on `created`
+                // (first time this PaymentIntent is recorded) so retries and the
+                // parallel payment_intent.succeeded event never duplicate it.
+                await sendInvoicePaymentConfirmationEmail(invoice.id, amountPaid);
               }
             }
             if (bookingId) {

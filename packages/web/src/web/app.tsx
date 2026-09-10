@@ -21,6 +21,8 @@ import CalendarPage from "./pages/calendar";
 import MessagesPage from "./pages/messages";
 import PackagesPage from "./pages/packages";
 import BookPage from "./pages/book";
+import PaymentSuccessPage from "./pages/payment-success";
+import PaymentCancelledPage from "./pages/payment-cancelled";
 import ProfilePage from "./pages/profile";
 import SettingsPage from "./pages/settings";
 import TeamPage from "./pages/team";
@@ -55,6 +57,10 @@ function App() {
           <Route path="/expenses" component={ExpensesPage} />
           <Route path="/book" component={BookPage} />
           <Route path="/book/confirmed" component={BookConfirmedPage} />
+          {/* Public post-payment pages — never behind <Protected>, never redirect
+              to /login. Reached from Stripe success_url / cancel_url. */}
+          <Route path="/payment-success" component={PaymentSuccessPage} />
+          <Route path="/payment-cancelled" component={PaymentCancelledPage} />
           <Route path="/profile" component={ProfilePage} />
           <Route path="/settings" component={SettingsPage} />
           <Route path="/team" component={TeamPage} />

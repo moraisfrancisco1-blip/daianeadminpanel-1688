@@ -5,6 +5,7 @@ import { sendEmail } from "./email";
 export type EmailType =
   | "invoice"
   | "payment_link"
+  | "payment_confirmation"
   | "booking_confirmation"
   | "reminder"
   | "cancellation"

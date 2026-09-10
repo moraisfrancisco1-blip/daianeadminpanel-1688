@@ -27,6 +27,7 @@ type EmailRow = {
 const TYPE_LABEL: Record<string, string> = {
   invoice: "Invoice",
   payment_link: "Payment Link",
+  payment_confirmation: "Payment Confirmation",
   booking_confirmation: "Booking Confirmation",
   reminder: "Reminder",
   cancellation: "Cancellation",
@@ -35,7 +36,7 @@ const TYPE_LABEL: Record<string, string> = {
   other: "Other",
 };
 
-const EMAIL_TYPES = ["invoice", "payment_link", "booking_confirmation", "reminder", "cancellation", "quote", "package", "other"];
+const EMAIL_TYPES = ["invoice", "payment_link", "payment_confirmation", "booking_confirmation", "reminder", "cancellation", "quote", "package", "other"];
 
 function fmtDate(iso: string): string {
   try {

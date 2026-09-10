@@ -302,7 +302,7 @@ export const emailLog = sqliteTable(
     bookingId: integer("booking_id"),
     recipientEmail: text("recipient_email").notNull(),
     recipientName: text("recipient_name"),
-    // invoice | payment_link | booking_confirmation | reminder | cancellation | quote | package | other
+    // invoice | payment_link | payment_confirmation | booking_confirmation | reminder | cancellation | quote | package | other
     type: text("type").notNull().default("other"),
     subject: text("subject").notNull(),
     // sent | failed  (Delivered only if the provider confirms it — Resend does not for emails.send)

@@ -12,6 +12,7 @@ import { exportsRoute } from "./routes/exports";
 import { dashboardRoute } from "./routes/dashboard";
 import { googleCalendarRoute } from "./routes/google-calendar";
 import { stripeWebhookRoute } from "./routes/stripe-webhook";
+import { paymentsRoute } from "./routes/payments";
 import { reportsRoute } from "./routes/reports";
 import { packagesRoute } from "./routes/packages";
 import { emailsRoute } from "./routes/emails";
@@ -26,6 +27,9 @@ import { expensesRoute } from "./routes/expenses";
 import { reportVoltWatchEvent } from "./services/volt-watch";
 import { rateLimitByIp } from "./lib/rate-limit";
 import { servicePaymentControlRoute } from "./routes/service/payment-control";
+import { serviceBookingsSummaryRoute } from "./routes/service/bookings-summary";
+import { serviceClientsSummaryRoute } from "./routes/service/clients-summary";
+import { serviceSystemHealthRoute } from "./routes/service/system-health";
 
 const app = new Hono()
   .use(cors({ origin: (origin) => origin ?? "*", credentials: true, exposeHeaders: ["set-auth-token"] }))
@@ -37,12 +41,23 @@ const app = new Hono()
   .on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
   // Stripe webhook must be registered BEFORE auth middleware (no auth required)
   .route("/api/stripe-webhook", stripeWebhookRoute)
-  // Volt Core service connector (Round 1: Payment Control, read-only). Also
-  // registered before authMiddleware — it has its own auth (X-Volt-Core-Key)
-  // and must never fall under the human-session/admin-role checks below.
+  // Public post-payment confirmation lookup (no login). A client who just paid
+  // is never authenticated in the Admin Panel, so this must sit before
+  // authMiddleware. It only reads a Checkout Session back from Stripe and is
+  // rate-limited by IP because it is reachable without a session.
+  .use("/api/payments/*", rateLimitByIp({ method: "GET", prefix: "payment-verify", limit: 30, windowMs: 15 * 60 * 1000 }))
+  .route("/api/payments", paymentsRoute)
+  // Volt Core service connector (X-Volt-Core-Key, read-only). Also registered
+  // before authMiddleware — it has its own auth and must never fall under the
+  // human-session/admin-role checks below.
+  // Round 1: Payment Control. Round 2: Bookings Summary, Clients Summary
+  // (bare counts only — see that route file for why), System Health.
   // Brute-force protection on the key itself, same treatment as human login.
   .use("/api/service/*", rateLimitByIp({ method: "GET", prefix: "service-key", limit: 30, windowMs: 15 * 60 * 1000 }))
   .route("/api/service/payment-control", servicePaymentControlRoute)
+  .route("/api/service/bookings-summary", serviceBookingsSummaryRoute)
+  .route("/api/service/clients-summary", serviceClientsSummaryRoute)
+  .route("/api/service/system-health", serviceSystemHealthRoute)
   // The public booking form has no login gate, so cap creates per IP —
   // 20 per hour is generous for a real client, tight for a spam script.
   .use("/api/bookings", rateLimitByIp({ method: "POST", prefix: "public-booking", limit: 20, windowMs: 60 * 60 * 1000 }))
