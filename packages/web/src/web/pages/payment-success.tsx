@@ -52,7 +52,7 @@ function ConfirmAnimation() {
   return (
     <div className="ps-halo-wrap">
       <div className="ps-halo" aria-hidden />
-      <svg viewBox="0 0 120 120" className="ps-check-svg" role="img" aria-label="Payment confirmed">
+      <svg viewBox="0 0 120 120" className="ps-check-svg" aria-hidden="true">
         <circle className="ps-ring" cx="60" cy="60" r="52" />
         <path className="ps-tick" d="M38 62 L53 77 L84 44" />
       </svg>
