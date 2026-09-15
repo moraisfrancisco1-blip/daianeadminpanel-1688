@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
+import { Time24Input } from "../components/time-24-input";
 import { api } from "../lib/api";
 import { Copy, MessageCircle, Mail, Check, Smartphone, History } from "lucide-react";
 
@@ -283,10 +284,9 @@ function MessagesContent() {
           </div>
           <div>
             <label className="text-xs text-muted-foreground">Time</label>
-            <input
-              type="time"
+            <Time24Input
               value={time}
-              onChange={(e) => setTime(e.target.value)}
+              onChange={setTime}
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
             />
           </div>

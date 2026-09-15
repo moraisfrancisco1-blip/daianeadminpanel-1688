@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
+import { Time24Input } from "../components/time-24-input";
 import { api } from "../lib/api";
 import { Link, useLocation } from "wouter";
 import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse } from "lucide-react";
@@ -855,12 +856,7 @@ function BookingDetailModal(props: {
               onChange={(e) => setDate(e.target.value)}
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
             />
-            <input
-              type="time"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-            />
+            <Time24Input value={startTime} onChange={setStartTime} />
           </div>
           {date && Math.abs(daysFromToday(date)) > FAR_DATE_WARNING_DAYS && (
             <p className="flex items-center gap-1.5 text-xs text-amber-600">
@@ -1040,23 +1036,11 @@ function BlockSlotModal(props: {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-xs text-muted-foreground">Início</label>
-            <input
-              type="time"
-              lang="en-GB"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-            />
+            <Time24Input value={startTime} onChange={setStartTime} />
           </div>
           <div>
             <label className="text-xs text-muted-foreground">Fim</label>
-            <input
-              type="time"
-              lang="en-GB"
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-            />
+            <Time24Input value={endTime} onChange={setEndTime} />
           </div>
         </div>
         <input
