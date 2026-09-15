@@ -335,6 +335,7 @@ function CalendarContent() {
           onSelectBooking={setSelectedBooking}
           onDeleteBlock={deleteBlock.mutate}
           onCreateBooking={(date, time) => navigateTo(`/bookings/manual?date=${date}&time=${time}`)}
+          onReschedule={(id, date, startTime) => updateBooking.mutate({ id, data: { date, startTime } })}
         />
         </div>
       )}
@@ -359,6 +360,18 @@ function CalendarContent() {
   );
 }
 
+type DragState = {
+  bookingId: number;
+  pointerId: number;
+  duration: number;
+  offsetY: number;
+  startX: number;
+  startY: number;
+  previewDate: string;
+  previewTop: number;
+  moved: boolean;
+};
+
 function TimeGrid(props: {
   view: "day" | "week";
   cursor: Date;
@@ -368,12 +381,25 @@ function TimeGrid(props: {
   onSelectBooking: (b: BookingItem) => void;
   onDeleteBlock: (id: number) => void;
   onCreateBooking: (date: string, time: string) => void;
+  onReschedule: (bookingId: number, date: string, startTime: string) => void;
 }) {
-  const { view, cursor, bookings, blocked, durationMap, onSelectBooking, onDeleteBlock, onCreateBooking } = props;
+  const { view, cursor, bookings, blocked, durationMap, onSelectBooking, onDeleteBlock, onCreateBooking, onReschedule } = props;
   const days = view === "day" ? [cursor] : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(cursor), i));
 
   const top = (t: string) => ((timeToMin(t) - HOUR_START * 60) / 60) * HOUR_HEIGHT;
   const height = (mins: number) => Math.max((mins / 60) * HOUR_HEIGHT, 22);
+
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const DRAG_THRESHOLD = 6;
+  const MIN_START = HOUR_START * 60;
+  const MAX_START = HOUR_END * 60 - 15;
+
+  function topToStartMin(topPx: number): number {
+    const raw = MIN_START + (topPx / HOUR_HEIGHT) * 60;
+    const snapped = Math.round(raw / 15) * 15;
+    return Math.max(MIN_START, Math.min(MAX_START, snapped));
+  }
+  const minToTopPx = (min: number) => ((min - MIN_START) / 60) * HOUR_HEIGHT;
 
   return (
     <div className={`bg-card border border-border rounded-xl ${view === "week" ? "overflow-x-auto" : ""}`}>
@@ -416,6 +442,7 @@ function TimeGrid(props: {
             return (
               <div
                 key={iso}
+                data-day-col={iso}
                 className={`flex-1 min-w-[90px] border-l relative ${amsterdamOnly ? "bg-pink-50" : ""}`}
                 style={{ height: HOURS.length * HOUR_HEIGHT }}
                 onDoubleClick={(e) => {
@@ -455,14 +482,67 @@ function TimeGrid(props: {
                   const dur = durationMap.get(b.serviceId ?? -1) ?? 60;
                   const isCancelled = b.status === "cancelled";
                   const isNoShow = b.status === "no_show";
+                  const isLocked = isCancelled || isNoShow;
                   const style = STATUS_STYLES[b.status] ?? "bg-neutral-500 text-white border-neutral-500";
+                  const isDragging = drag?.bookingId === b.id;
                   return (
                     <button
                       key={b.id}
-                      onClick={() => onSelectBooking(b)}
+                      onClick={() => {
+                        if (isLocked) onSelectBooking(b);
+                      }}
                       onDoubleClick={(e) => e.stopPropagation()}
-                      className="absolute left-0.5 right-0.5 rounded border overflow-hidden shadow-sm text-left"
-                      style={{ top: top(b.startTime), height: height(dur) }}
+                      onPointerDown={(e) => {
+                        if (isLocked || e.button !== 0) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                        setDrag({
+                          bookingId: b.id,
+                          pointerId: e.pointerId,
+                          duration: dur,
+                          offsetY: e.clientY - rect.top,
+                          startX: e.clientX,
+                          startY: e.clientY,
+                          previewDate: iso,
+                          previewTop: top(b.startTime),
+                          moved: false,
+                        });
+                      }}
+                      onPointerMove={(e) => {
+                        setDrag((d) => {
+                          if (!d || d.bookingId !== b.id) return d;
+                          const dx = e.clientX - d.startX;
+                          const dy = e.clientY - d.startY;
+                          const moved = d.moved || Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD;
+                          if (!moved) return d;
+                          const target = document.elementFromPoint(e.clientX, e.clientY);
+                          const col = target?.closest<HTMLElement>("[data-day-col]");
+                          const previewDate = col?.dataset.dayCol ?? d.previewDate;
+                          const colRect = col?.getBoundingClientRect();
+                          const previewTop = colRect
+                            ? minToTopPx(topToStartMin(e.clientY - colRect.top - d.offsetY))
+                            : d.previewTop;
+                          return { ...d, moved, previewDate, previewTop };
+                        });
+                      }}
+                      onPointerUp={(e) => {
+                        setDrag((d) => {
+                          if (!d || d.bookingId !== b.id) return d;
+                          e.currentTarget.releasePointerCapture(e.pointerId);
+                          if (d.moved) {
+                            const newStartTime = minToTime(topToStartMin(d.previewTop));
+                            onReschedule(b.id, d.previewDate, newStartTime);
+                          } else {
+                            onSelectBooking(b);
+                          }
+                          return null;
+                        });
+                      }}
+                      onPointerCancel={() => setDrag((d) => (d?.bookingId === b.id ? null : d))}
+                      className={`absolute left-0.5 right-0.5 rounded border overflow-hidden shadow-sm text-left ${
+                        isLocked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"
+                      } ${isDragging ? "opacity-30" : ""}`}
+                      style={{ top: top(b.startTime), height: height(dur), touchAction: isLocked ? "auto" : "none" }}
                     >
                       <div className={`absolute inset-0 ${style} ${isCancelled ? "opacity-40" : ""}`} />
                       <div className="relative px-1.5 py-1">
@@ -485,6 +565,16 @@ function TimeGrid(props: {
                     </button>
                   );
                 })}
+                {drag && drag.moved && drag.previewDate === iso && (
+                  <div
+                    className="absolute left-0.5 right-0.5 rounded border-2 border-dashed border-brand-copper bg-brand-copper/15 pointer-events-none z-10 flex items-start px-1.5 py-1"
+                    style={{ top: drag.previewTop, height: height(drag.duration) }}
+                  >
+                    <span className="text-[10px] font-semibold text-brand-copper bg-white/80 rounded px-1">
+                      {minToTime(topToStartMin(drag.previewTop))}
+                    </span>
+                  </div>
+                )}
               </div>
             );
           })}
