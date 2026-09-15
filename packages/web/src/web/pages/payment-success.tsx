@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Confetti } from "../components/confetti";
 
 /**
  * PUBLIC post-payment landing page (FASE 2/4/5/6/13).
@@ -133,6 +134,7 @@ export default function PaymentSuccessPage() {
 
             {state === "confirmed" && info && (
               <>
+                <Confetti />
                 <ConfirmAnimation />
                 <p className="mt-6 text-[11px] tracking-[0.28em] text-brand-copper font-medium ps-fade ps-d1">
                   PAYMENT CONFIRMED
@@ -230,10 +232,11 @@ export default function PaymentSuccessPage() {
   );
 }
 
-// Scoped keyframes — subtle, premium celebration (no confetti). The circle draws
-// itself, the tick follows, a soft peach/gold glow breathes behind it and three
-// tiny sparks fade in and out. Pure CSS/SVG, zero external assets, and fully
-// disabled under prefers-reduced-motion.
+// Scoped keyframes for the subtle, premium check-mark celebration. The circle
+// draws itself, the tick follows, a soft peach/gold glow breathes behind it and
+// three tiny sparks fade in and out. Pure CSS/SVG, zero external assets, and
+// fully disabled under prefers-reduced-motion. The canvas confetti burst
+// (<Confetti />, mounted alongside this) has its own reduced-motion check.
 const PS_STYLES = `
 .ps-halo-wrap { position: relative; width: 116px; height: 116px; margin: 0 auto; }
 .ps-halo {

@@ -20,9 +20,7 @@ export const COMPANY = {
   // Overridable via GOOGLE_REVIEW_URL without a code change; the hardcoded
   // value below is the studio's real listing and is reused by the public
   // /payment-success page and the post-session review email.
-  googleReviewUrl:
-    process.env.GOOGLE_REVIEW_URL ??
-    "https://www.google.com/search?q=Studio+Da%C3%AF+Oakes+Cr%C3%ADticas&rflfq=1&num=20&stick=H4sIAAAAAAAAAONgkxK2tDQxtDQzMjQwMjU3tDQ0MjS23MDI-IpROrikNCUzX8El8fB6Bf_E7NRiBeeiw2tLMpMTixex4pMFAORTz0NWAAAA&rldimm=9941962102571912139&tbm=lcl&hl=pt-PT#lkt=LocalPoiReviews",
+  googleReviewUrl: process.env.GOOGLE_REVIEW_URL ?? "https://g.page/r/CcvLMYbb8fiJECE/review",
   instagramHandle: "@dai.oakes",
   instagramUrl: "https://www.instagram.com/dai.oakes",
   // Reward for tagging an Instagram story AND leaving a Google review.
