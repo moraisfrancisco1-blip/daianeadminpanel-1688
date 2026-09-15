@@ -509,26 +509,38 @@ function TimeGrid(props: {
                         });
                       }}
                       onPointerMove={(e) => {
+                        // Capture the fields we need synchronously — React resets
+                        // currentTarget (and may not keep clientX/Y readable) on the
+                        // synthetic event once this handler returns, and the setDrag
+                        // updater below can run after that point.
+                        const clientX = e.clientX;
+                        const clientY = e.clientY;
                         setDrag((d) => {
                           if (!d || d.bookingId !== b.id) return d;
-                          const dx = e.clientX - d.startX;
-                          const dy = e.clientY - d.startY;
+                          const dx = clientX - d.startX;
+                          const dy = clientY - d.startY;
                           const moved = d.moved || Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD;
                           if (!moved) return d;
-                          const target = document.elementFromPoint(e.clientX, e.clientY);
+                          const target = document.elementFromPoint(clientX, clientY);
                           const col = target?.closest<HTMLElement>("[data-day-col]");
                           const previewDate = col?.dataset.dayCol ?? d.previewDate;
                           const colRect = col?.getBoundingClientRect();
                           const previewTop = colRect
-                            ? minToTopPx(topToStartMin(e.clientY - colRect.top - d.offsetY))
+                            ? minToTopPx(topToStartMin(clientY - colRect.top - d.offsetY))
                             : d.previewTop;
                           return { ...d, moved, previewDate, previewTop };
                         });
                       }}
                       onPointerUp={(e) => {
+                        const captureTarget = e.currentTarget;
+                        const pointerId = e.pointerId;
                         setDrag((d) => {
                           if (!d || d.bookingId !== b.id) return d;
-                          e.currentTarget.releasePointerCapture(e.pointerId);
+                          try {
+                            captureTarget.releasePointerCapture(pointerId);
+                          } catch {
+                            // already released (e.g. pointercancel fired first) — harmless
+                          }
                           if (d.moved) {
                             const newStartTime = minToTime(topToStartMin(d.previewTop));
                             onReschedule(b.id, d.previewDate, newStartTime);
