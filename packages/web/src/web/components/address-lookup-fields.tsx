@@ -35,7 +35,7 @@ export function AddressLookupFields({ onFound }: { onFound: (address: FoundAddre
   return (
     <div className="rounded-md border border-dashed border-input p-3 space-y-2">
       <p className="text-xs text-muted-foreground">Preencher morada automaticamente (código postal + nº de porta, NL)</p>
-      <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_auto]">
         <input
           value={postcode}
           onChange={(e) => {
@@ -43,7 +43,7 @@ export function AddressLookupFields({ onFound }: { onFound: (address: FoundAddre
             setState("idle");
           }}
           placeholder="1234 AB"
-          className="h-10 px-3 rounded-md border border-input bg-background text-sm"
+          className="h-10 px-3 rounded-md border border-input bg-background text-sm min-w-0"
         />
         <input
           value={houseNumber}
@@ -52,13 +52,13 @@ export function AddressLookupFields({ onFound }: { onFound: (address: FoundAddre
             setState("idle");
           }}
           placeholder="Nº"
-          className="h-10 px-3 rounded-md border border-input bg-background text-sm"
+          className="h-10 px-3 rounded-md border border-input bg-background text-sm min-w-0"
         />
         <button
           type="button"
           onClick={lookup}
           disabled={state === "loading" || !postcode.trim() || !houseNumber.trim()}
-          className="h-10 px-3 rounded-md border border-input text-sm font-medium hover:bg-accent disabled:opacity-50 inline-flex items-center gap-1.5"
+          className="h-10 px-3 rounded-md border border-input text-sm font-medium hover:bg-accent disabled:opacity-50 inline-flex items-center justify-center gap-1.5 col-span-2 sm:col-span-1"
         >
           {state === "loading" ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
           Procurar
