@@ -940,6 +940,7 @@ function BlockSlotModal(props: {
             <label className="text-xs text-muted-foreground">Início</label>
             <input
               type="time"
+              lang="en-GB"
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
@@ -949,6 +950,7 @@ function BlockSlotModal(props: {
             <label className="text-xs text-muted-foreground">Fim</label>
             <input
               type="time"
+              lang="en-GB"
               value={endTime}
               onChange={(e) => setEndTime(e.target.value)}
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
