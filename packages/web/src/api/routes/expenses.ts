@@ -1,11 +1,31 @@
 import { Hono } from "hono";
 import { put, del } from "@vercel/blob";
+import Anthropic from "@anthropic-ai/sdk";
 import { db } from "../database";
 import { expenses } from "../database/schema";
 import { eq, desc, and, gte, lt } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { extractExpenseFromFile } from "../services/expense-extract";
 import { recordAudit, actorFromContext } from "../lib/audit";
+
+// Maps a scan failure to a message that actually tells the admin what to do,
+// instead of a generic "Auto-detection failed" that looks the same whether
+// the key is missing, the account is out of credit, or the model was rate-limited.
+function describeExtractError(err: unknown): string {
+  if (err instanceof Anthropic.AuthenticationError) {
+    return "Auto-fill failed: ANTHROPIC_API_KEY is missing or invalid in the deployment's environment variables.";
+  }
+  if (err instanceof Anthropic.PermissionDeniedError) {
+    return "Auto-fill failed: the Anthropic API key doesn't have permission for this request.";
+  }
+  if (err instanceof Anthropic.RateLimitError) {
+    return "Auto-fill failed: rate-limited by Anthropic — try again in a moment.";
+  }
+  if (err instanceof Anthropic.APIError) {
+    return `Auto-fill failed: Anthropic API error (${err.status}) — ${err.message}`;
+  }
+  return err instanceof Error ? err.message : "Auto-detection failed";
+}
 
 export const expensesRoute = new Hono()
   .get("/", requireAuth, async (c) => {
@@ -48,7 +68,7 @@ export const expensesRoute = new Hono()
     try {
       extracted = await extractExpenseFromFile(buffer, file.type);
     } catch (err) {
-      extractError = err instanceof Error ? err.message : "Auto-detection failed";
+      extractError = describeExtractError(err);
       console.error("[expenses] Extraction failed:", err);
     }
 
