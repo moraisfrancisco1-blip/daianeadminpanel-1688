@@ -4,7 +4,7 @@ import { Protected } from "../components/protected";
 import { Time24Input } from "../components/time-24-input";
 import { api } from "../lib/api";
 import { Link, useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse, Percent } from "lucide-react";
 
 const FAR_DATE_WARNING_DAYS = 15;
 
@@ -29,6 +29,8 @@ type BookingItem = {
   status: string;
   depositAmount: number;
   depositStatus: string;
+  discountType: "percent" | "fixed" | null;
+  discountValue: number | null;
   payFullNow: boolean;
   invoiceId: number | null;
   notes: string | null;
@@ -668,6 +670,8 @@ function BookingDetailModal(props: {
   const [startTime, setStartTime] = useState(booking.startTime);
   const [status, setStatus] = useState(booking.status);
   const [sessionNotes, setSessionNotes] = useState(booking.notes ?? "");
+  const [discountType, setDiscountType] = useState<"" | "percent" | "fixed">(booking.discountType ?? "");
+  const [discountValue, setDiscountValue] = useState(booking.discountValue != null ? String(booking.discountValue) : "");
   const [paymentLinkOpen, setPaymentLinkOpen] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -891,6 +895,40 @@ function BookingDetailModal(props: {
 
         {!effectiveInvoiceId && (
           <div className="border-t pt-3 space-y-2">
+            <p className="text-sm font-medium flex items-center gap-1.5">
+              <Percent className="size-4" /> Desconto
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <select
+                value={discountType}
+                onChange={(e) => setDiscountType(e.target.value as "" | "percent" | "fixed")}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+              >
+                <option value="">Sem desconto</option>
+                <option value="percent">Percentagem (%)</option>
+                <option value="fixed">Valor fixo (€)</option>
+              </select>
+              <input
+                type="number"
+                aria-label="Valor do desconto"
+                step="0.01"
+                min="0"
+                max={discountType === "percent" ? 100 : undefined}
+                value={discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
+                placeholder="0"
+                disabled={!discountType}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm disabled:opacity-50"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Aplica-se à fatura como uma linha "Discount" separada, quando a fatura for gerada.
+            </p>
+          </div>
+        )}
+
+        {!effectiveInvoiceId && (
+          <div className="border-t pt-3 space-y-2">
             <button
               type="button"
               onClick={generateInvoice}
@@ -945,7 +983,20 @@ function BookingDetailModal(props: {
             Cancelar
           </button>
           <button
-            onClick={() => onSave({ name, email, phone: phone || null, serviceId, date, startTime, status, notes: sessionNotes || null })}
+            onClick={() =>
+              onSave({
+                name,
+                email,
+                phone: phone || null,
+                serviceId,
+                date,
+                startTime,
+                status,
+                notes: sessionNotes || null,
+                discountType: discountType || null,
+                discountValue: discountType && discountValue ? Number(discountValue) : null,
+              })
+            }
             disabled={saving}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
           >

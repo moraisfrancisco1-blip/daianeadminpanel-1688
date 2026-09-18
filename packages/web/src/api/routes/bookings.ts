@@ -7,7 +7,7 @@ import { stripe } from "../services/stripe";
 import { sendTrackedEmail } from "../services/email-log";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildRemainderPaymentEmailHtml } from "../lib/email-templates";
 import { nextNumber } from "../lib/counters";
-import { computeVat, computeTotals, type LineInput } from "../lib/totals";
+import { computeTotals, computeDiscountAmount, discountLineInput, type LineInput, type DiscountType } from "../lib/totals";
 import { invoiceDescriptionForService } from "../lib/invoice-description";
 import { COMPANY } from "../lib/company";
 import { changeInvoiceStatus } from "../services/invoice-activity";
@@ -405,6 +405,8 @@ export const bookingsRoute = new Hono()
         status: bookings.status,
         depositAmount: bookings.depositAmount,
         depositStatus: bookings.depositStatus,
+        discountType: bookings.discountType,
+        discountValue: bookings.discountValue,
         payFullNow: bookings.payFullNow,
         invoiceId: bookings.invoiceId,
         invoiceStatus: invoices.status,
@@ -466,6 +468,9 @@ export const bookingsRoute = new Hono()
     // derived from the day the admin picked (Tue/Thu = Amsterdam).
     const location = locationForDay(new Date(`${body.date}T00:00:00`).getDay());
 
+    const discountType: DiscountType | null = body.discountType === "percent" || body.discountType === "fixed" ? body.discountType : null;
+    const discountValue = discountType && body.discountValue != null ? Number(body.discountValue) : null;
+
     const [booking] = await db
       .insert(bookings)
       .values({
@@ -480,6 +485,8 @@ export const bookingsRoute = new Hono()
         status: "confirmed",
         depositAmount: usedPackage ? service.price : (body.depositAmount ?? 0),
         depositStatus: usedPackage || body.depositAmount ? (usedPackage ? "paid" : "unpaid") : "paid",
+        discountType,
+        discountValue,
         payFullNow: true,
         paymentMethod: usedPackage ? "package" : (body.paymentMethod ?? null),
         notes: usedPackage ? [body.notes, `Paid via package: ${usedPackage.name} (#${usedPackage.id})`].filter(Boolean).join(" — ") : (body.notes ?? null),
@@ -491,8 +498,10 @@ export const bookingsRoute = new Hono()
       await db.insert(packageUsages).values({ packageId: usedPackage.id, bookingId: booking!.id, sessions: 1 });
     }
 
-    // Determine if this is truly a full payment or just a deposit
-    const isFullPayment = booking!.depositAmount >= service.price;
+    // Determine if this is truly a full payment or just a deposit (against
+    // the discounted price, since that's the actual amount owed).
+    const discountAmount = computeDiscountAmount(service.price, discountType, discountValue);
+    const isFullPayment = booking!.depositAmount >= service.price - discountAmount;
 
     // Create an Admin invoice for the amount the client still owes
     // (service price minus any deposit already accounted for, plus an
@@ -513,6 +522,8 @@ export const bookingsRoute = new Hono()
         unitPrice: servicePending,
         vatRate: service.vatRate,
       });
+      const discountLine = discountLineInput(service.price, service.vatRate, discountType, discountValue);
+      if (discountLine) lineInputs.push(discountLine);
     }
 
     // Travel / home-visit charge — filled in per booking since the distance
@@ -675,6 +686,18 @@ export const bookingsRoute = new Hono()
       return c.json({ message: "The selected time is not available" }, 409);
     }
 
+    // Discount fields are only touched when the caller actually sends them —
+    // the drag-to-reschedule action only sends { date, startTime } and must
+    // never wipe out a discount set earlier through the edit modal.
+    const discountType: DiscountType | null =
+      "discountType" in body
+        ? body.discountType === "percent" || body.discountType === "fixed"
+          ? body.discountType
+          : null
+        : (existing.discountType as DiscountType | null);
+    const discountValue =
+      "discountValue" in body ? (body.discountValue != null ? Number(body.discountValue) : null) : existing.discountValue;
+
     const [booking] = await db
       .update(bookings)
       .set({
@@ -687,6 +710,8 @@ export const bookingsRoute = new Hono()
         location: locationForDay(new Date(`${date}T00:00:00`).getDay()),
         notes: body.notes ?? existing.notes,
         status,
+        discountType,
+        discountValue,
       })
       .where(eq(bookings.id, id))
       .returning();
@@ -741,7 +766,13 @@ export const bookingsRoute = new Hono()
     if (!service) return c.json({ message: "Service not found" }, 404);
 
     const vatRate = service.vatRate;
-    const { net, vat } = computeVat(service.price, vatRate);
+    const lineInputs: LineInput[] = [
+      { description: invoiceDescriptionForService(service), serviceId: service.id, quantity: 1, unitPrice: service.price, vatRate },
+    ];
+    const discountLine = discountLineInput(service.price, vatRate, booking.discountType as DiscountType | null, booking.discountValue);
+    if (discountLine) lineInputs.push(discountLine);
+
+    const { lineItems, subtotal, vatTotal, total } = computeTotals(lineInputs);
     const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
     const issueDate = new Date();
     const dueDate = new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
@@ -755,21 +786,23 @@ export const bookingsRoute = new Hono()
         status: "draft",
         issueDate,
         dueDate,
-        subtotal: net,
-        vatTotal: vat,
-        total: service.price,
+        subtotal,
+        vatTotal,
+        total,
       })
       .returning();
 
-    await db.insert(invoiceItems).values({
-      invoiceId: invoice!.id,
-      serviceId: service.id,
-      description: invoiceDescriptionForService(service),
-      quantity: 1,
-      unitPrice: net,
-      vatRate,
-      amount: net,
-    });
+    for (const item of lineItems) {
+      await db.insert(invoiceItems).values({
+        invoiceId: invoice!.id,
+        serviceId: item.serviceId ?? null,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        vatRate: item.vatRate,
+        amount: item.amount,
+      });
+    }
 
     await db.update(bookings).set({ invoiceId: invoice!.id }).where(eq(bookings.id, id));
 

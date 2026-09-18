@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { computeVat, computeTotals, vatBreakdownFromNet, netToGross, round2 } from "./totals";
+import { computeVat, computeTotals, vatBreakdownFromNet, netToGross, round2, computeDiscountAmount, discountLineInput } from "./totals";
 
 describe("computeVat", () => {
   test("splits a gross amount into net + VAT at 9%", () => {
@@ -85,5 +85,54 @@ describe("round2", () => {
   test("rounds to 2 decimal places", () => {
     expect(round2(10 / 3)).toBe(3.33);
     expect(round2(9.999)).toBe(10);
+  });
+});
+
+describe("computeDiscountAmount", () => {
+  test("returns 0 when there's no discount configured", () => {
+    expect(computeDiscountAmount(100, null, null)).toBe(0);
+    expect(computeDiscountAmount(100, "percent", null)).toBe(0);
+    expect(computeDiscountAmount(100, "percent", 0)).toBe(0);
+  });
+
+  test("computes a percent discount off the service price", () => {
+    expect(computeDiscountAmount(100, "percent", 10)).toBe(10);
+    expect(computeDiscountAmount(80, "percent", 25)).toBe(20);
+  });
+
+  test("uses a fixed discount as-is", () => {
+    expect(computeDiscountAmount(100, "fixed", 15)).toBe(15);
+  });
+
+  test("clamps so the discount never exceeds the service price", () => {
+    expect(computeDiscountAmount(50, "fixed", 999)).toBe(50);
+    expect(computeDiscountAmount(50, "percent", 200)).toBe(50);
+  });
+
+  test("clamps a negative discount value to 0", () => {
+    expect(computeDiscountAmount(100, "fixed", -20)).toBe(0);
+  });
+});
+
+describe("discountLineInput", () => {
+  test("returns null when there's nothing to discount", () => {
+    expect(discountLineInput(100, 0.09, null, null)).toBeNull();
+  });
+
+  test("builds a negative line at the service's VAT rate for a percent discount", () => {
+    const line = discountLineInput(100, 0.09, "percent", 10);
+    expect(line).toEqual({ description: "Discount -10%", quantity: 1, unitPrice: -10, vatRate: 0.09 });
+  });
+
+  test("builds a negative line for a fixed discount", () => {
+    const line = discountLineInput(100, 0.21, "fixed", 15);
+    expect(line).toEqual({ description: "Discount -€15.00", quantity: 1, unitPrice: -15, vatRate: 0.21 });
+  });
+
+  test("a discount line correctly reduces the invoice total via computeTotals", () => {
+    const service: import("./totals").LineInput = { description: "Massage 60min", quantity: 1, unitPrice: 100, vatRate: 0.09 };
+    const discount = discountLineInput(100, 0.09, "percent", 10)!;
+    const { total } = computeTotals([service, discount]);
+    expect(total).toBeCloseTo(90, 2);
   });
 });

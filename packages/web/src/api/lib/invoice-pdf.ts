@@ -15,6 +15,11 @@ const FONT_BUFFERS = {
 };
 const LOGO_BUFFER = Buffer.from(Logo_B64, "base64");
 
+/** "-€13.76" for a negative amount (e.g. a discount line) instead of the confusing "€-13.76". */
+function formatEuro(n: number): string {
+  return n < 0 ? `-€${Math.abs(n).toFixed(2)}` : `€${n.toFixed(2)}`;
+}
+
 interface InvoiceItemLike {
   description: string;
   quantity: number;
@@ -170,9 +175,9 @@ export function generateInvoicePdf(data: InvoicePdfData): Promise<Buffer> {
       doc.fillColor(TEXT_DARK);
       doc.text(item.description, 52, y + 8, { width: 240 });
       doc.text(String(item.quantity), 300, y + 8, { width: 40, align: "right" });
-      doc.text(`€${item.unitPrice.toFixed(2)}`, 345, y + 8, { width: 70, align: "right" });
+      doc.text(formatEuro(item.unitPrice), 345, y + 8, { width: 70, align: "right" });
       doc.fillColor(TEXT_MUTED).text(`${Math.round(item.vatRate * 100)}%`, 420, y + 8, { width: 40, align: "right" });
-      doc.fillColor(TEXT_DARK).text(`€${item.amount.toFixed(2)}`, 465, y + 8, { width: 90, align: "right" });
+      doc.fillColor(TEXT_DARK).text(formatEuro(item.amount), 465, y + 8, { width: 90, align: "right" });
       y += rowH;
       rowIndex++;
     }

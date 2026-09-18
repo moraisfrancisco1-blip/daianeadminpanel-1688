@@ -179,6 +179,8 @@ export const bookings = sqliteTable("bookings", {
   status: text("status").notNull().default("pending_deposit"), // pending_deposit, confirmed, cancelled, completed, no_show
   depositAmount: real("deposit_amount").notNull().default(25),
   depositStatus: text("deposit_status").notNull().default("unpaid"), // unpaid, paid, refunded
+  discountType: text("discount_type"), // percent | fixed | null (no discount)
+  discountValue: real("discount_value"), // percent: 0-100, fixed: a EUR amount
   payFullNow: integer("pay_full_now", { mode: "boolean" }).notNull().default(false),
   paymentMethod: text("payment_method"), // stripe_card, ideal
   stripePaymentIntentId: text("stripe_payment_intent_id"),

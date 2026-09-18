@@ -4,7 +4,7 @@ import { Protected } from "../components/protected";
 import { api } from "../lib/api";
 import { normalize, idFromQuery } from "../lib/list";
 import { Link, useLocation } from "wouter";
-import { ArrowLeft, Loader2, Calendar, Clock, User, Mail, Phone, FileText, Search, UserPlus, AlertTriangle, X, Car } from "lucide-react";
+import { ArrowLeft, Loader2, Calendar, Clock, User, Mail, Phone, FileText, Search, UserPlus, AlertTriangle, X, Car, Percent } from "lucide-react";
 
 type ClientSuggestion = { id: number; name: string; email: string | null; phone: string | null };
 
@@ -48,12 +48,15 @@ function BookingManualContent() {
     generateInvoice: true,
     packageId: null as number | null,
     notes: "",
+    discountType: "" as "" | "percent" | "fixed",
+    discountValue: "",
     travelPrice: "",
     travelKm: "",
     travelTimeMinutes: "",
     travelVatRate: "0.09",
   });
   const [showTravel, setShowTravel] = useState(false);
+  const [showDiscount, setShowDiscount] = useState(false);
 
   // Session packages the selected client can pay this booking with.
   const clientPackagesQ = useQuery({
@@ -120,6 +123,8 @@ function BookingManualContent() {
           generateInvoice: data.generateInvoice,
           packageId: data.packageId ?? undefined,
           notes: data.notes || null,
+          discountType: data.discountType || undefined,
+          discountValue: data.discountType && data.discountValue ? Number(data.discountValue) : undefined,
           travelPrice: data.travelPrice ? Number(data.travelPrice) : undefined,
           travelKm: data.travelKm ? Number(data.travelKm) : undefined,
           travelTimeMinutes: data.travelTimeMinutes ? Number(data.travelTimeMinutes) : undefined,
@@ -150,12 +155,15 @@ function BookingManualContent() {
         generateInvoice: true,
         packageId: null,
         notes: "",
+        discountType: "",
+        discountValue: "",
         travelPrice: "",
         travelKm: "",
         travelTimeMinutes: "",
         travelVatRate: "0.09",
       });
       setShowTravel(false);
+      setShowDiscount(false);
       // Return to the Agenda (same week/date) when the form was opened from a double-click.
       if (initialDate) {
         const createdDate = (data as any)?.booking?.date || initialDate;
@@ -494,6 +502,69 @@ function BookingManualContent() {
                   </span>
                 </span>
               </label>
+            </div>
+
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDiscount((v) => !v);
+                  if (showDiscount) setFormData((f) => ({ ...f, discountType: "", discountValue: "" }));
+                }}
+                className="flex items-center gap-2 text-sm font-medium text-brand-copper"
+              >
+                <Percent className="size-4" /> {showDiscount ? "Remove discount" : "Add discount"}
+              </button>
+              {showDiscount && (
+                <div className="mt-3 p-4 rounded-lg border border-border bg-muted/30 space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Shown on the invoice as a separate "Discount" line, applied to the service price.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">Type</label>
+                      <select
+                        value={formData.discountType}
+                        onChange={(e) => setFormData({ ...formData, discountType: e.target.value as "" | "percent" | "fixed" })}
+                        className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      >
+                        <option value="">No discount</option>
+                        <option value="percent">Percentage (%)</option>
+                        <option value="fixed">Fixed amount (€)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="discount-value" className="block text-xs text-muted-foreground mb-1">
+                        {formData.discountType === "fixed" ? "Amount (€)" : "Percentage (%)"}
+                      </label>
+                      <input
+                        id="discount-value"
+                        aria-label={formData.discountType === "fixed" ? "Amount (€)" : "Percentage (%)"}
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max={formData.discountType === "percent" ? 100 : undefined}
+                        value={formData.discountValue}
+                        onChange={(e) => setFormData({ ...formData, discountValue: e.target.value })}
+                        placeholder="0"
+                        disabled={!formData.discountType}
+                        className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+                      />
+                    </div>
+                  </div>
+                  {formData.discountType && Number(formData.discountValue) > 0 && (() => {
+                    const service = services.data?.services.find((s) => s.id === Number(formData.serviceId));
+                    if (!service) return null;
+                    const raw = formData.discountType === "percent" ? (service.price * Number(formData.discountValue)) / 100 : Number(formData.discountValue);
+                    const discount = Math.min(Math.max(raw, 0), service.price);
+                    return (
+                      <p className="text-xs text-muted-foreground">
+                        €{service.price.toFixed(2)} − €{discount.toFixed(2)} = <span className="font-medium text-foreground">€{(service.price - discount).toFixed(2)}</span>
+                      </p>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
 
             <div>

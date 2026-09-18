@@ -92,3 +92,36 @@ export function computeTotals(items: LineInput[]) {
   };
 }
 
+export type DiscountType = "percent" | "fixed";
+
+/**
+ * GROSS discount amount for a service price, clamped to [0, servicePrice] so
+ * a discount can never flip a line item negative overall.
+ */
+export function computeDiscountAmount(
+  servicePrice: number,
+  discountType: DiscountType | null | undefined,
+  discountValue: number | null | undefined,
+): number {
+  if (!discountType || !discountValue) return 0;
+  const raw = discountType === "percent" ? (servicePrice * discountValue) / 100 : discountValue;
+  return round2(Math.min(Math.max(raw, 0), servicePrice));
+}
+
+/**
+ * Builds the negative "Discount" invoice line for a service at the same VAT
+ * rate as the service itself (so the discount reduces the taxable base, not
+ * just the final total) — or null if there's nothing to discount.
+ */
+export function discountLineInput(
+  servicePrice: number,
+  vatRate: number,
+  discountType: DiscountType | null | undefined,
+  discountValue: number | null | undefined,
+): LineInput | null {
+  const amount = computeDiscountAmount(servicePrice, discountType, discountValue);
+  if (amount <= 0) return null;
+  const description = discountType === "percent" ? `Discount -${discountValue}%` : `Discount -€${amount.toFixed(2)}`;
+  return { description, quantity: 1, unitPrice: -amount, vatRate };
+}
+
