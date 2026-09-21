@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { Time24Input } from "../components/time-24-input";
@@ -419,6 +419,11 @@ function CalendarContent() {
   );
 }
 
+// On a touch screen a booking only becomes draggable after the finger has been held still on it for
+// this long. Anything that moves sooner is the user scrolling / swiping the page, not moving a booking.
+const TOUCH_HOLD_MS = 3000;
+const TOUCH_HOLD_CANCEL_PX = 10;
+
 type DragState = {
   bookingId: number;
   pointerId: number;
@@ -429,6 +434,10 @@ type DragState = {
   previewDate: string;
   previewTop: number;
   moved: boolean;
+  /** Finger (not mouse/pen): must hold before dragging. */
+  touch: boolean;
+  /** Ready to drag — always true for mouse/pen, true for touch once the hold completes. */
+  armed: boolean;
 };
 
 function TimeGrid(props: {
@@ -453,6 +462,26 @@ function TimeGrid(props: {
 
   const [drag, setDrag] = useState<DragState | null>(null);
   const DRAG_THRESHOLD = 6;
+
+  const holdTimer = useRef<number | null>(null);
+  const armedRef = useRef(false); // a touch drag is armed: the page must not scroll under the finger
+  const endHold = () => {
+    if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+    armedRef.current = false;
+  };
+  // Once armed, stop the browser from scrolling the page as the finger moves. React registers touchmove
+  // as passive, so this needs a native non-passive listener.
+  useEffect(() => {
+    const block = (ev: TouchEvent) => {
+      if (armedRef.current && ev.cancelable) ev.preventDefault();
+    };
+    window.addEventListener("touchmove", block, { passive: false });
+    return () => {
+      window.removeEventListener("touchmove", block);
+      endHold();
+    };
+  }, []);
   const MIN_START = HOUR_START * 60;
   const MAX_START = HOUR_END * 60 - 15;
 
@@ -465,6 +494,7 @@ function TimeGrid(props: {
 
   return (
     <div className={`bg-card border border-border rounded-xl ${view === "week" ? "overflow-x-auto" : ""}`}>
+      <style>{"@keyframes booking-hold-fill { from { width: 0 } to { width: 100% } }"}</style>
       <div className={view === "week" ? "min-w-[720px]" : ""}>
         <div className="flex">
           <div className="w-12 shrink-0" />
@@ -567,7 +597,10 @@ function TimeGrid(props: {
                   const isNoShow = b.status === "no_show";
                   const isLocked = isCancelled || isNoShow;
                   const style = STATUS_STYLES[b.status] ?? "bg-neutral-500 text-white border-neutral-500";
-                  const isDragging = drag?.bookingId === b.id;
+                  const mine = drag?.bookingId === b.id ? drag : null;
+                  const isDragging = !!mine?.moved; // dim the original once the ghost is being moved
+                  const isHolding = !!mine && mine.touch && !mine.armed; // finger down, waiting for the hold to complete
+                  const isLifted = !!mine && mine.touch && mine.armed && !mine.moved; // hold done: ready to drag
                   const inConflict = conflictBookingIds.has(b.id);
                   return (
                     <button
@@ -579,7 +612,9 @@ function TimeGrid(props: {
                       onPointerDown={(e) => {
                         if (isLocked || e.button !== 0) return;
                         const rect = e.currentTarget.getBoundingClientRect();
+                        const isTouch = e.pointerType === "touch";
                         e.currentTarget.setPointerCapture(e.pointerId);
+                        endHold();
                         setDrag({
                           bookingId: b.id,
                           pointerId: e.pointerId,
@@ -590,7 +625,16 @@ function TimeGrid(props: {
                           previewDate: iso,
                           previewTop: top(b.startTime),
                           moved: false,
+                          touch: isTouch,
+                          armed: !isTouch,
                         });
+                        if (isTouch) {
+                          holdTimer.current = window.setTimeout(() => {
+                            armedRef.current = true;
+                            navigator.vibrate?.(40);
+                            setDrag((d) => (d && d.bookingId === b.id ? { ...d, armed: true } : d));
+                          }, TOUCH_HOLD_MS);
+                        }
                       }}
                       onPointerMove={(e) => {
                         // Capture the fields we need synchronously — React resets
@@ -603,6 +647,14 @@ function TimeGrid(props: {
                           if (!d || d.bookingId !== b.id) return d;
                           const dx = clientX - d.startX;
                           const dy = clientY - d.startY;
+                          if (d.touch && !d.armed) {
+                            // Still waiting for the hold: moving now means the user is scrolling or swiping.
+                            if (Math.hypot(dx, dy) > TOUCH_HOLD_CANCEL_PX) {
+                              endHold();
+                              return null;
+                            }
+                            return d;
+                          }
                           const moved = d.moved || Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD;
                           if (!moved) return d;
                           const target = document.elementFromPoint(clientX, clientY);
@@ -618,6 +670,7 @@ function TimeGrid(props: {
                       onPointerUp={(e) => {
                         const captureTarget = e.currentTarget;
                         const pointerId = e.pointerId;
+                        endHold();
                         setDrag((d) => {
                           if (!d || d.bookingId !== b.id) return d;
                           try {
@@ -628,20 +681,45 @@ function TimeGrid(props: {
                           if (d.moved) {
                             const newStartTime = minToTime(topToStartMin(d.previewTop));
                             onReschedule(b.id, d.previewDate, newStartTime);
-                          } else {
+                          } else if (!(d.touch && d.armed)) {
+                            // A plain tap opens the booking. Holding to drag and letting go without moving does nothing.
                             onSelectBooking(b);
                           }
                           return null;
                         });
                       }}
-                      onPointerCancel={() => setDrag((d) => (d?.bookingId === b.id ? null : d))}
+                      onPointerCancel={() => {
+                        endHold();
+                        setDrag((d) => (d?.bookingId === b.id ? null : d));
+                      }}
+                      onContextMenu={(e) => {
+                        // Long-press on a phone opens the browser menu / text selection: not while holding to drag.
+                        if (mine?.touch) e.preventDefault();
+                      }}
                       className={`absolute left-0.5 right-0.5 rounded border overflow-hidden shadow-sm text-left ${
                         isLocked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"
-                      } ${isDragging ? "opacity-30" : ""} ${inConflict ? "ring-2 ring-red-500 z-[5]" : ""}`}
-                      style={{ top: top(b.startTime), height: height(dur), touchAction: isLocked ? "auto" : "none" }}
+                      } ${isDragging ? "opacity-30" : ""} ${inConflict ? "ring-2 ring-red-500 z-[5]" : ""} ${
+                        isLifted ? "ring-2 ring-brand-copper shadow-xl scale-[1.03] z-10" : ""
+                      } transition-transform`}
+                      style={{
+                        top: top(b.startTime),
+                        height: height(dur),
+                        // "manipulation" keeps normal scrolling/swiping on touch (the old "none" made the page
+                        // impossible to scroll from a booking); mouse is unaffected.
+                        touchAction: isLocked ? "auto" : "manipulation",
+                        WebkitTouchCallout: "none",
+                        WebkitUserSelect: "none",
+                        userSelect: "none",
+                      }}
                       title={inConflict ? "Conflito: há outra coisa nesta hora" : undefined}
                     >
                       <div className={`absolute inset-0 ${style} ${isCancelled ? "opacity-40" : ""}`} />
+                      {isHolding && (
+                        <div
+                          className="absolute left-0 bottom-0 h-1 bg-brand-copper z-10"
+                          style={{ animation: `booking-hold-fill ${TOUCH_HOLD_MS}ms linear forwards` }}
+                        />
+                      )}
                       <div className="relative px-1.5 py-1">
                         {isCancelled && <p className="text-[11px] font-bold text-red-600 truncate">Cancelada</p>}
                         {isNoShow && <p className="text-[11px] font-bold text-amber-500 truncate">Não compareceu</p>}
