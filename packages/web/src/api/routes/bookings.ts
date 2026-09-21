@@ -15,6 +15,7 @@ import { createCalendarEvent, getGoogleEventBlocks, deleteCalendarEvent, updateC
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 import { recordAudit, actorFromContext } from "../lib/audit";
 import { shiftDate } from "../lib/busy-intervals";
+import { schedulingLocation } from "../lib/coffee-talk";
 
 const BUFFER_MIN = 0; // no artificial gap between sessions — only real overlap is blocked
 const SLOT_GRANULARITY_MIN = 15;
@@ -180,12 +181,13 @@ export const bookingsRoute = new Hono()
     // Public booking always sends a location; admin (manual booking) omits it to
     // see every working day, since the admin can override the location split.
     const location = c.req.query("location") || undefined;
-    const schedule = scheduleFor(date, location);
-    if (!schedule) return c.json({ slots: [] }, 200);
 
     const [service] = c.req.query("serviceId")
       ? await db.select().from(services).where(eq(services.id, Number(c.req.query("serviceId"))))
       : [null];
+    // Coffee & Talk can also be booked on Tue/Thu with Rotterdam; other services keep the location split.
+    const schedule = scheduleFor(date, schedulingLocation(location, service));
+    if (!schedule) return c.json({ slots: [] }, 200);
     const duration = service?.durationMinutes ?? 60;
 
     // Weekly-schedule blocks, admin "Bloquear horário" blocks and active bookings.
@@ -220,7 +222,7 @@ export const bookingsRoute = new Hono()
     }
     const location = body.location === "amsterdam" ? "amsterdam" : "rotterdam";
     if (
-      !(await isSlotAvailable(body.date, body.startTime, service.durationMinutes, undefined, location)) ||
+      !(await isSlotAvailable(body.date, body.startTime, service.durationMinutes, undefined, schedulingLocation(location, service))) ||
       (await overlapsGoogleBusy(body.date, body.startTime, service.durationMinutes))
     ) {
       return c.json({ message: "The selected time is not available" }, 409);

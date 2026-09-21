@@ -445,7 +445,7 @@ function TimeGrid(props: {
                 className={`flex-1 min-w-[90px] border-l border-b px-2 py-2 text-center ${
                   isToday ? "bg-brand-cream" : amsterdamOnly ? "bg-pink-100" : ""
                 }`}
-                title={amsterdamOnly ? "Só para clientes de Amsterdão" : undefined}
+                title={amsterdamOnly ? "Só para clientes de Amsterdão (exceto Coffee & Talk)" : undefined}
               >
                 <p className="text-xs font-medium">{day.toLocaleDateString("en-GB", { weekday: "short" })}</p>
                 <p className={`text-lg font-display ${isToday ? "text-brand-copper" : ""}`}>{day.getDate()}</p>

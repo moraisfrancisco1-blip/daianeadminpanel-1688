@@ -11,16 +11,18 @@ import { PolicySection } from "../components/book/policy-section";
 import { LocationSection } from "../components/book/location-section";
 import { ServiceSelector } from "../components/book/service-selector";
 import { TermsCheckbox } from "../components/book/terms-checkbox";
+import { isCoffeeTalkService } from "../../api/lib/coffee-talk";
 
 const LOCATION_DAYS: Record<"rotterdam" | "amsterdam", number[]> = {
   rotterdam: [1, 3, 5],
   amsterdam: [2, 4],
 };
 
-function nextWorkDays(count: number, location: "rotterdam" | "amsterdam"): string[] {
+// Coffee & Talk with Rotterdam is also open on Tue/Thu, i.e. every working weekday.
+function nextWorkDays(count: number, location: "rotterdam" | "amsterdam", coffeeTalk: boolean): string[] {
   const dates: string[] = [];
   const d = new Date();
-  const workDays = LOCATION_DAYS[location];
+  const workDays = coffeeTalk && location === "rotterdam" ? [1, 2, 3, 4, 5] : LOCATION_DAYS[location];
   while (dates.length < count) {
     d.setDate(d.getDate() + 1);
     if (workDays.includes(d.getDay())) dates.push(d.toISOString().slice(0, 10));
@@ -61,13 +63,15 @@ export default function BookPage() {
 
   const selectedService = services.data?.services.find((s) => s.id === serviceId);
   const isFree = selectedService?.price === 0;
-  const dates = nextWorkDays(9, location);
+  const coffeeTalk = isCoffeeTalkService(selectedService);
+  const dates = nextWorkDays(9, location, coffeeTalk);
+  const rotterdamAllWeek = coffeeTalk && location === "rotterdam";
 
-  // Re-pick a date when the location changes so it's never stale for the new location's days.
+  // Re-pick a date when the location (or a service with different days) changes so it's never stale.
   useEffect(() => {
     setDate("");
     setTime("");
-  }, [location]);
+  }, [location, coffeeTalk]);
 
   // Pre-select a service when arriving via a direct link, e.g. /book?service=8
   // (used for per-service buttons on the main website). The `serviceId !== null`
@@ -161,7 +165,7 @@ export default function BookPage() {
                       location === "rotterdam" ? "bg-brand-teal text-white border-brand-teal" : "border-input bg-background"
                     }`}
                   >
-                    Rotterdam (Mon/Wed/Fri)
+                    {coffeeTalk ? "Rotterdam (Mon–Fri)" : "Rotterdam (Mon/Wed/Fri)"}
                   </button>
                   <button
                     type="button"
@@ -178,7 +182,11 @@ export default function BookPage() {
               <div>
                 <label className="text-sm font-medium mb-1.5 block flex items-center gap-1.5 text-brand-teal">
                   <CalendarDays className="size-4" />
-                  {location === "amsterdam" ? "Date (Tue / Thu)" : "Date (Mon / Wed / Fri, 10:00–18:00)"}
+                  {location === "amsterdam"
+                    ? "Date (Tue / Thu)"
+                    : rotterdamAllWeek
+                      ? "Date (Mon – Fri)"
+                      : "Date (Mon / Wed / Fri, 10:00–18:00)"}
                 </label>
                 <select
                   className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
