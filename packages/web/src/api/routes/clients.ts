@@ -5,6 +5,7 @@ import { eq, desc, inArray, or } from "drizzle-orm";
 import { computeDiscountAmount, round2, type DiscountType } from "../lib/totals";
 import { requireAuth } from "../middleware/auth";
 import { createStripeCustomer, updateStripeCustomer, findStripeCustomerByEmail } from "../services/stripe-sync";
+import { syncBookingsToClient, CONTACT_FIELDS } from "../lib/client-sync";
 
 function parseTags(raw: string | null): string[] {
   if (!raw) return [];
@@ -296,6 +297,17 @@ export const clientsRoute = new Hono()
       })
       .where(eq(clients.id, id))
       .returning();
+
+    // Bookings keep their own copy of the contact details, so a correction made here must reach
+    // them (and the Google events of upcoming ones) — otherwise the booking still shows the old data.
+    const contactChanged = CONTACT_FIELDS.some((f) => (existingClient[f] ?? "") !== (client![f] ?? ""));
+    if (contactChanged) {
+      try {
+        await syncBookingsToClient(existingClient, client!);
+      } catch (err) {
+        console.error("[clients] saved the client but could not sync their bookings", err);
+      }
+    }
     return c.json({ client }, 200);
   })
   .delete("/:id", requireAuth, async (c) => {

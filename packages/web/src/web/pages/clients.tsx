@@ -104,6 +104,9 @@ function ClientsContent() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["clients"] });
       qc.invalidateQueries({ queryKey: ["client"] });
+      // Their bookings follow the corrected details (see PUT /clients/:id).
+      qc.invalidateQueries({ queryKey: ["bookings"] });
+      qc.invalidateQueries({ queryKey: ["calendar-bookings"] });
       closeEdit();
     },
   });
