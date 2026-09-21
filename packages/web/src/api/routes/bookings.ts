@@ -432,7 +432,9 @@ export const bookingsRoute = new Hono()
         discountType: bookings.discountType,
         discountValue: bookings.discountValue,
         payFullNow: bookings.payFullNow,
-        invoiceId: bookings.invoiceId,
+        // From the joined invoice, not the booking's own column: a booking can still point at an
+        // invoice that was deleted, and that must read as "no invoice" (not "has one, can't find it").
+        invoiceId: invoices.id,
         invoiceStatus: invoices.status,
         invoiceNumber: invoices.invoiceNumber,
         notes: bookings.notes,
@@ -766,7 +768,11 @@ export const bookingsRoute = new Hono()
     const id = Number(c.req.param("id"));
     const [booking] = await db.select().from(bookings).where(eq(bookings.id, id));
     if (!booking) return c.json({ message: "Booking not found" }, 404);
-    if (booking.invoiceId) return c.json({ message: "This booking already has an invoice" }, 400);
+    if (booking.invoiceId) {
+      const [linked] = await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.id, booking.invoiceId));
+      if (linked) return c.json({ message: "This booking already has an invoice" }, 400);
+      // The linked invoice was deleted earlier; the new one below replaces the stale reference.
+    }
 
     // The modal sends whatever discount is on screen — it must not depend on the
     // admin having pressed Save first. No body / no discount keys = use what's stored.
