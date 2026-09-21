@@ -1,7 +1,7 @@
 import { db } from "../database";
 import { googleCalendarAuth } from "../database/schema";
 import { eq } from "drizzle-orm";
-import { busyBlockToMinutes, eventToDaySegments, shiftDate, type GoogleEventLike } from "../lib/busy-intervals";
+import { eventToDaySegments, shiftDate, type GoogleEventLike } from "../lib/busy-intervals";
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -178,54 +178,6 @@ export async function listCalendars(): Promise<
 
 export async function disconnectGoogleCalendar() {
   await db.delete(googleCalendarAuth).where(eq(googleCalendarAuth.id, "primary"));
-}
-
-/**
- * Busy intervals (minutes-of-day, Europe/Amsterdam) for the given date, across the
- * connected account's primary calendar AND the calendar bookings are written to —
- * personal time is usually blocked on the primary one even when bookings sync
- * to a dedicated studio calendar.
- *
- * Throws if Google can't be queried, so callers decide whether to fail open.
- */
-export async function getGoogleBusyIntervals(dateISO: string): Promise<{ start: number; end: number }[]> {
-  const token = await getValidAccessToken();
-  if (!token) return [];
-  const calendarIds = Array.from(new Set(["primary", await getSelectedCalendarId()]));
-
-  // Ask for a window padded by a day on each side (UTC) and clip each block to
-  // the local day afterwards, so all-day and overnight events are handled.
-  const res = await fetch("https://www.googleapis.com/calendar/v3/freeBusy", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      timeMin: `${shiftDate(dateISO, -1)}T00:00:00Z`,
-      timeMax: `${shiftDate(dateISO, 2)}T00:00:00Z`,
-      timeZone: TZ,
-      items: calendarIds.map((id) => ({ id })),
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Google freeBusy failed (${res.status}): ${await res.text()}`);
-  }
-  const data = (await res.json()) as {
-    calendars?: Record<string, { busy?: { start: string; end: string }[]; errors?: { reason?: string }[] }>;
-  };
-
-  const out: { start: number; end: number }[] = [];
-  for (const [id, cal] of Object.entries(data.calendars ?? {})) {
-    if (cal.errors?.length) {
-      console.error(`[google-calendar] freeBusy error for calendar ${id}:`, JSON.stringify(cal.errors));
-    }
-    for (const block of cal.busy ?? []) {
-      const clipped = busyBlockToMinutes(block, dateISO);
-      if (clipped) out.push(clipped);
-    }
-  }
-  return out;
 }
 
 export type GoogleBlock = {

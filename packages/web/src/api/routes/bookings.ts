@@ -11,7 +11,7 @@ import { computeTotals, computeDiscountAmount, discountLineInput, type LineInput
 import { invoiceDescriptionForService } from "../lib/invoice-description";
 import { COMPANY } from "../lib/company";
 import { changeInvoiceStatus } from "../services/invoice-activity";
-import { createCalendarEvent, getGoogleBusyIntervals, getGoogleEventBlocks, deleteCalendarEvent, updateCalendarEvent } from "../services/google-calendar";
+import { createCalendarEvent, getGoogleEventBlocks, deleteCalendarEvent, updateCalendarEvent, type GoogleBlock } from "../services/google-calendar";
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 import { recordAudit, actorFromContext } from "../lib/audit";
 import { shiftDate } from "../lib/busy-intervals";
@@ -70,8 +70,30 @@ function scheduleFor(dateStr: string, location?: string): DaySchedule | null {
   return schedule;
 }
 
-function isBlockedBySchedule(schedule: DaySchedule, startMin: number, endMin: number): boolean {
-  return schedule.blocks.some((b) => startMin < b.endMin && endMin > b.startMin);
+type Interval = { start: number; end: number };
+
+/**
+ * Everything the app itself knows makes a day unavailable: the weekly
+ * schedule's fixed blocks, one-off blocks the admin made ("Bloquear horário"),
+ * and active bookings. The public slot list and the booking-time check both
+ * read from here so they can never disagree about what is free.
+ */
+async function localBusyIntervals(date: string, schedule: DaySchedule, excludeBookingId?: number): Promise<Interval[]> {
+  const [blocked, active, allServices] = await Promise.all([
+    db.select().from(blockedSlots).where(eq(blockedSlots.date, date)),
+    db.select().from(bookings).where(and(eq(bookings.date, date), inArray(bookings.status, ["confirmed", "pending_deposit"]))),
+    db.select().from(services),
+  ]);
+  const serviceDuration = new Map(allServices.map((s) => [s.id, s.durationMinutes]));
+
+  const out: Interval[] = schedule.blocks.map((b) => ({ start: b.startMin, end: b.endMin }));
+  for (const blk of blocked) out.push({ start: timeToMinutes(blk.startTime), end: timeToMinutes(blk.endTime) });
+  for (const b of active) {
+    if (excludeBookingId != null && b.id === excludeBookingId) continue;
+    const start = timeToMinutes(b.startTime);
+    out.push({ start: start - BUFFER_MIN, end: start + (serviceDuration.get(b.serviceId) ?? 60) + BUFFER_MIN });
+  }
+  return out;
 }
 
 async function isSlotAvailable(date: string, startTime: string, durationMinutes: number, excludeBookingId?: number, location?: string): Promise<boolean> {
@@ -80,30 +102,32 @@ async function isSlotAvailable(date: string, startTime: string, durationMinutes:
   const start = timeToMinutes(startTime);
   const end = start + durationMinutes;
   if (start < schedule.startMin || end > schedule.endMin) return false;
-  if (isBlockedBySchedule(schedule, start, end)) return false;
 
-  // One-off blocked slots
-  const blocked = await db.select().from(blockedSlots).where(eq(blockedSlots.date, date));
-  const blockedOverlap = blocked.some((blk) => {
-    const bs = timeToMinutes(blk.startTime);
-    const be = timeToMinutes(blk.endTime);
-    return start < be && end > bs;
-  });
-  if (blockedOverlap) return false;
+  const busy = await localBusyIntervals(date, schedule, excludeBookingId);
+  return !busy.some((b) => start < b.end && end > b.start);
+}
 
-  const allServices = await db.select().from(services);
-  const serviceDuration = new Map(allServices.map((s) => [s.id, s.durationMinutes]));
-  const overlapping = await db
-    .select()
+/**
+ * Google Calendar events that make Daiane busy, minus the ones that are this
+ * app's own synced bookings: those are already accounted for by the bookings
+ * table (which knows a cancelled booking no longer blocks anything, even if its
+ * Google event lingers). Shared by the agenda and by public availability so
+ * what the admin sees blocked is exactly what clients cannot book.
+ */
+async function externalGoogleBlocks(from: string, to: string): Promise<{ connected: boolean; blocks: GoogleBlock[] }> {
+  const { connected, blocks } = await getGoogleEventBlocks(from, to);
+  if (!connected) return { connected: false, blocks: [] };
+  const own = await db
+    .select({ googleEventId: bookings.googleEventId })
     .from(bookings)
-    .where(and(eq(bookings.date, date), inArray(bookings.status, ["confirmed", "pending_deposit"])));
+    .where(and(isNotNull(bookings.googleEventId), gte(bookings.date, shiftDate(from, -1)), lte(bookings.date, shiftDate(to, 1))));
+  const ownIds = new Set(own.map((r) => r.googleEventId));
+  return { connected: true, blocks: blocks.filter((b) => !ownIds.has(b.eventId)) };
+}
 
-  return !overlapping.some((b) => {
-    if (excludeBookingId != null && b.id === excludeBookingId) return false;
-    const bs = timeToMinutes(b.startTime);
-    const bd = serviceDuration.get(b.serviceId) ?? 60;
-    return start < bs + bd + BUFFER_MIN && end > bs - BUFFER_MIN;
-  });
+async function googleBusyIntervals(date: string): Promise<Interval[]> {
+  const { blocks } = await externalGoogleBlocks(date, date);
+  return blocks.map((b) => ({ start: b.startMin, end: b.endMin }));
 }
 
 // Final check for public bookings: the slot list a client is looking at can be
@@ -114,7 +138,7 @@ async function overlapsGoogleBusy(date: string, startTime: string, durationMinut
   try {
     const start = timeToMinutes(startTime);
     const end = start + durationMinutes;
-    const busy = await getGoogleBusyIntervals(date);
+    const busy = await googleBusyIntervals(date);
     return busy.some((b) => start < b.end + BUFFER_MIN && end > b.start - BUFFER_MIN);
   } catch (err) {
     console.error("[bookings] could not verify Google Calendar availability — allowing the booking", err);
@@ -164,35 +188,13 @@ export const bookingsRoute = new Hono()
       : [null];
     const duration = service?.durationMinutes ?? 60;
 
-    const existing = await db.select().from(bookings).where(
-      and(eq(bookings.date, date), eq(bookings.status, "confirmed")),
-    );
-    const pending = await db.select().from(bookings).where(
-      and(eq(bookings.date, date), eq(bookings.status, "pending_deposit")),
-    );
-
-    // Look up durations for existing bookings to build accurate busy intervals.
-    const allServices = await db.select().from(services);
-    const serviceDuration = new Map(allServices.map((s) => [s.id, s.durationMinutes]));
-
-    // Each existing booking blocks [start - buffer, start + duration + buffer)
-    // so every session keeps at least a 15 min gap on both sides.
-    const busyIntervals = [...existing, ...pending].map((b) => {
-      const start = timeToMinutes(b.startTime);
-      const dur = serviceDuration.get(b.serviceId) ?? 60;
-      return { start: start - BUFFER_MIN, end: start + dur + BUFFER_MIN };
-    });
-
-    // Static blocked intervals from the weekly schedule (e.g. 09:00–10:00 on Monday).
-    for (const b of schedule.blocks) {
-      busyIntervals.push({ start: b.startMin, end: b.endMin });
-    }
+    // Weekly-schedule blocks, admin "Bloquear horário" blocks and active bookings.
+    const busyIntervals = await localBusyIntervals(date, schedule);
 
     // Also block out any events already on Daiane's Google Calendar for this date,
     // so the public site never offers a slot she's already busy with elsewhere.
     try {
-      const googleBusy = await getGoogleBusyIntervals(date);
-      for (const b of googleBusy) {
+      for (const b of await googleBusyIntervals(date)) {
         busyIntervals.push({ start: b.start - BUFFER_MIN, end: b.end + BUFFER_MIN });
       }
     } catch (err) {
@@ -956,26 +958,19 @@ export const bookingsRoute = new Hono()
       return c.json({ message: "from and to (YYYY-MM-DD, at most 62 days apart) are required" }, 400);
     }
     try {
-      const { connected, blocks } = await getGoogleEventBlocks(from, to);
+      const { connected, blocks } = await externalGoogleBlocks(from, to);
       if (!connected) return c.json({ connected: false, blocks: [] }, 200);
-      const own = await db
-        .select({ googleEventId: bookings.googleEventId })
-        .from(bookings)
-        .where(and(isNotNull(bookings.googleEventId), gte(bookings.date, shiftDate(from, -1)), lte(bookings.date, shiftDate(to, 1))));
-      const ownIds = new Set(own.map((r) => r.googleEventId));
       return c.json(
         {
           connected: true,
-          blocks: blocks
-            .filter((b) => !ownIds.has(b.eventId))
-            .map((b) => ({
-              key: `${b.eventId}:${b.date}`,
-              summary: b.summary,
-              date: b.date,
-              startTime: minutesToTime(b.startMin),
-              endTime: b.endMin >= 1440 ? "24:00" : minutesToTime(b.endMin),
-              allDay: b.allDay,
-            })),
+          blocks: blocks.map((b) => ({
+            key: `${b.eventId}:${b.date}`,
+            summary: b.summary,
+            date: b.date,
+            startTime: minutesToTime(b.startMin),
+            endTime: b.endMin >= 1440 ? "24:00" : minutesToTime(b.endMin),
+            allDay: b.allDay,
+          })),
         },
         200,
       );
