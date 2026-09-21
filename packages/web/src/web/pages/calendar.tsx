@@ -36,7 +36,7 @@ type BookingItem = {
   notes: string | null;
 };
 
-type GoogleBlock = { key: string; summary: string; date: string; startTime: string; endTime: string; allDay: boolean };
+type GoogleBlock = { key: string; summary: string; calendar?: string; date: string; startTime: string; endTime: string; allDay: boolean };
 type BlockedSlot = { id: number; date: string; startTime: string; endTime: string; reason: string | null };
 type Service = { id: number; name: string; durationMinutes: number; price: number };
 
@@ -504,7 +504,7 @@ function TimeGrid(props: {
                       onDoubleClick={(e) => e.stopPropagation()}
                       className="absolute left-0.5 right-0.5 rounded bg-sky-100/90 border border-sky-300 px-1 overflow-hidden pointer-events-auto"
                       style={{ top: top(minToTime(startMin)), height: height(endMin - startMin) }}
-                      title={`Google Calendar · ${g.summary} · ${g.allDay ? "dia inteiro" : `${g.startTime}–${g.endTime}`}`}
+                      title={`Google Calendar${g.calendar ? ` (${g.calendar})` : ""} · ${g.summary} · ${g.allDay ? "dia inteiro" : `${g.startTime}–${g.endTime}`}`}
                     >
                       <span className="text-[10px] text-sky-900 truncate block">
                         Google · {g.summary}

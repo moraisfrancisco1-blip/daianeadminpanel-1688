@@ -146,8 +146,10 @@ function RemindersContent() {
           <div className="mt-4 border-t border-border pt-4">
             <label className="block text-sm font-medium mb-1">Agenda de agendamentos</label>
             <p className="text-xs text-muted-foreground mb-2">
-              Escolha em qual agenda da sua conta os agendamentos confirmados devem ser criados. As demais
-              agendas também são respeitadas na disponibilidade.
+              Escolha em qual agenda da sua conta os agendamentos confirmados devem ser criados. Todas as suas
+              agendas que estejam visíveis no Google Calendar (marcadas na lista à esquerda) bloqueiam a
+              disponibilidade online; os eventos marcados como "Livre" e as agendas só de leitura (feriados,
+              aniversários) não bloqueiam.
             </p>
             <select
               className="w-full max-w-md rounded-md border border-border bg-background px-3 py-2 text-sm"

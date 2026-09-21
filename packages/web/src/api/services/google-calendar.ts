@@ -145,6 +145,7 @@ export async function getSelectedCalendarId(): Promise<string> {
 }
 
 export async function setSelectedCalendarId(calendarId: string) {
+  writableCache = null;
   await db
     .update(googleCalendarAuth)
     .set({ selectedCalendarId: calendarId, updatedAt: new Date() })
@@ -153,7 +154,7 @@ export async function setSelectedCalendarId(calendarId: string) {
 
 /** Lists every calendar on the connected Google account so the admin can pick which one to sync bookings to. */
 export async function listCalendars(): Promise<
-  { id: string; summary: string; primary: boolean; accessRole: string }[]
+  { id: string; summary: string; primary: boolean; accessRole: string; selected: boolean }[]
 > {
   const token = await getValidAccessToken();
   if (!token) return [];
@@ -166,17 +167,83 @@ export async function listCalendars(): Promise<
     return [];
   }
   const data = (await res.json()) as {
-    items?: { id: string; summary?: string; summaryOverride?: string; primary?: boolean; accessRole?: string }[];
+    items?: {
+      id: string;
+      summary?: string;
+      summaryOverride?: string;
+      primary?: boolean;
+      accessRole?: string;
+      selected?: boolean;
+    }[];
   };
   return (data.items ?? []).map((c) => ({
     id: c.id,
-    summary: c.summaryOverride ?? c.summary ?? c.id,
+    summary: (c.summaryOverride ?? c.summary ?? c.id).trim(),
     primary: !!c.primary,
     accessRole: c.accessRole ?? "",
+    // Google omits the flag when the calendar is unticked in its sidebar.
+    selected: !!c.selected,
   }));
 }
 
+type WritableCalendar = { id: string; name: string; primary: boolean; visible: boolean };
+type CalendarRef = { id: string; name: string };
+
+let writableCache: { at: number; calendars: WritableCalendar[] } | null = null;
+const CALENDAR_CACHE_MS = 5 * 60 * 1000;
+
+/**
+ * Calendars on the account that Daiane can write to. Cached for a few minutes:
+ * public availability needs this on every request. A failed lookup is not cached.
+ */
+async function writableCalendars(): Promise<WritableCalendar[]> {
+  if (writableCache && Date.now() - writableCache.at < CALENDAR_CACHE_MS) return writableCache.calendars;
+  const calendars = (await listCalendars())
+    .filter((c) => c.accessRole === "owner" || c.accessRole === "writer")
+    .map((c) => ({ id: c.id, name: c.summary, primary: c.primary, visible: c.selected }));
+  if (calendars.length > 0) writableCache = { at: Date.now(), calendars };
+  return calendars;
+}
+
+/** The booking calendar's real id ("primary" is only an alias for the account's own calendar). */
+async function bookingCalendarId(writable: WritableCalendar[]): Promise<string> {
+  const selectedId = await getSelectedCalendarId();
+  const primary = writable.find((c) => c.primary);
+  return selectedId === "primary" && primary ? primary.id : selectedId;
+}
+
+/**
+ * Calendars whose events make Daiane busy: every calendar of hers that is ticked
+ * in Google Calendar (what she sees there is what blocks online booking), her main
+ * calendar, and the one bookings are written to. Read-only ones (holidays,
+ * birthdays) and unticked ones are ignored. If the list can't be read, falls back
+ * to the main + booking calendars.
+ */
+async function calendarsToRead(): Promise<CalendarRef[]> {
+  const writable = await writableCalendars();
+  const bookingId = await bookingCalendarId(writable);
+  const out = new Map<string, CalendarRef>();
+  for (const c of writable) {
+    if (c.visible || c.primary || c.id === bookingId) out.set(c.id, { id: c.id, name: c.name });
+  }
+  if (writable.length === 0) out.set("primary", { id: "primary", name: "Google Calendar" });
+  if (!out.has(bookingId)) out.set(bookingId, { id: bookingId, name: bookingId });
+  return [...out.values()];
+}
+
+/**
+ * Where to look for an event that already exists: the booking calendar first, then her
+ * other calendars. An event stays on the calendar it was created on even if the booking
+ * calendar is changed later, so touching it only on the current one leaves it behind.
+ */
+async function calendarIdsForExistingEvent(): Promise<string[]> {
+  const writable = await writableCalendars();
+  const first = await bookingCalendarId(writable);
+  return [first, ...writable.map((c) => c.id).filter((id) => id !== first)];
+}
+
 export async function disconnectGoogleCalendar() {
+  writableCache = null;
   await db.delete(googleCalendarAuth).where(eq(googleCalendarAuth.id, "primary"));
 }
 
@@ -187,11 +254,12 @@ export type GoogleBlock = {
   startMin: number;
   endMin: number;
   allDay: boolean;
+  calendarName: string;
 };
 
 /**
- * Events that make Daiane busy between two dates (inclusive), from the primary
- * calendar and the booking-sync calendar, split into per-day blocks for the admin
+ * Events that make Daiane busy between two dates (inclusive), from all her visible
+ * calendars (see calendarsToRead), split into per-day blocks for the admin
  * calendar. `connected: false` means Google isn't linked (nothing to show).
  * Throws if Google can't be read, so the caller can tell the admin.
  */
@@ -201,11 +269,11 @@ export async function getGoogleEventBlocks(
 ): Promise<{ connected: boolean; blocks: GoogleBlock[] }> {
   const token = await getValidAccessToken();
   if (!token) return { connected: false, blocks: [] };
-  const calendarIds = Array.from(new Set(["primary", await getSelectedCalendarId()]));
+  const calendars = await calendarsToRead();
 
   const seen = new Set<string>();
   const blocks: GoogleBlock[] = [];
-  for (const calendarId of calendarIds) {
+  for (const { id: calendarId, name: calendarName } of calendars) {
     let pageToken: string | undefined;
     for (let page = 0; page < 4; page++) {
       const params = new URLSearchParams({
@@ -228,7 +296,7 @@ export async function getGoogleEventBlocks(
         if (seen.has(ev.id)) continue;
         seen.add(ev.id);
         for (const seg of eventToDaySegments(ev, fromISO, toISO)) {
-          blocks.push({ eventId: ev.id, summary: ev.summary?.trim() || "Busy", ...seg });
+          blocks.push({ eventId: ev.id, summary: ev.summary?.trim() || "Busy", calendarName, ...seg });
         }
       }
       pageToken = data.nextPageToken;
@@ -298,23 +366,27 @@ export async function createCalendarEvent(params: {
 export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
   const token = await getValidAccessToken();
   if (!token) return false;
-  const calendarId = await getSelectedCalendarId();
 
   try {
-    const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all`,
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
+    for (const calendarId of await calendarIdsForExistingEvent()) {
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         },
-      },
-    );
-    if (!res.ok) {
-      console.error("[google-calendar] deleteEvent failed", await res.text());
-      return false;
+      );
+      if (res.ok || res.status === 410) return true; // 410: already gone
+      if (res.status !== 404) {
+        console.error("[google-calendar] deleteEvent failed", res.status, await res.text());
+        return false;
+      }
+      // 404: not on this calendar — try her other ones.
     }
-    return true;
+    console.error("[google-calendar] deleteEvent: event not found on any calendar", eventId);
+    return false;
   } catch (err) {
     console.error("[google-calendar] deleteEvent error", err);
     return false;
@@ -336,7 +408,6 @@ export async function updateCalendarEvent(params: {
 }): Promise<boolean> {
   const token = await getValidAccessToken();
   if (!token) return false;
-  const calendarId = await getSelectedCalendarId();
 
   const startDateTime = `${params.date}T${params.startTime}:00`;
   const [h, m] = params.startTime.split(":").map(Number);
@@ -350,30 +421,37 @@ export async function updateCalendarEvent(params: {
     attendees.push({ email: DAINE_EMAIL });
   }
 
+  const body = JSON.stringify({
+    summary: params.summary,
+    description: params.description,
+    start: { dateTime: startDateTime, timeZone: TZ },
+    end: { dateTime: endDateTime, timeZone: TZ },
+    attendees,
+    reminders: { useDefault: true },
+  });
+
   try {
-    const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(params.eventId)}?sendUpdates=all`,
-      {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+    for (const calendarId of await calendarIdsForExistingEvent()) {
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(params.eventId)}?sendUpdates=all`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body,
         },
-        body: JSON.stringify({
-          summary: params.summary,
-          description: params.description,
-          start: { dateTime: startDateTime, timeZone: TZ },
-          end: { dateTime: endDateTime, timeZone: TZ },
-          attendees,
-          reminders: { useDefault: true },
-        }),
-      },
-    );
-    if (!res.ok) {
-      console.error("[google-calendar] updateEvent failed", await res.text());
-      return false;
+      );
+      if (res.ok) return true;
+      if (res.status !== 404) {
+        console.error("[google-calendar] updateEvent failed", res.status, await res.text());
+        return false;
+      }
+      // 404: not on this calendar — try her other ones.
     }
-    return true;
+    console.error("[google-calendar] updateEvent: event not found on any calendar", params.eventId);
+    return false;
   } catch (err) {
     console.error("[google-calendar] updateEvent error", err);
     return false;

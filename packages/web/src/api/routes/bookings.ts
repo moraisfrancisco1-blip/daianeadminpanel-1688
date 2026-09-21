@@ -980,6 +980,7 @@ export const bookingsRoute = new Hono()
           blocks: blocks.map((b) => ({
             key: `${b.eventId}:${b.date}`,
             summary: b.summary,
+            calendar: b.calendarName,
             date: b.date,
             startTime: minutesToTime(b.startMin),
             endTime: b.endMin >= 1440 ? "24:00" : minutesToTime(b.endMin),
