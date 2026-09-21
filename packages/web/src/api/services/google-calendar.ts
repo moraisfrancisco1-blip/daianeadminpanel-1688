@@ -1,6 +1,7 @@
 import { db } from "../database";
 import { googleCalendarAuth } from "../database/schema";
 import { eq } from "drizzle-orm";
+import { busyBlockToMinutes, shiftDate } from "../lib/busy-intervals";
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -179,16 +180,21 @@ export async function disconnectGoogleCalendar() {
   await db.delete(googleCalendarAuth).where(eq(googleCalendarAuth.id, "primary"));
 }
 
-/** Busy intervals (in minutes-of-day, Europe/Amsterdam) for the primary Google Calendar on the given date. */
+/**
+ * Busy intervals (minutes-of-day, Europe/Amsterdam) for the given date, across the
+ * connected account's primary calendar AND the calendar bookings are written to —
+ * personal time is usually blocked on the primary one even when bookings sync
+ * to a dedicated studio calendar.
+ *
+ * Throws if Google can't be queried, so callers decide whether to fail open.
+ */
 export async function getGoogleBusyIntervals(dateISO: string): Promise<{ start: number; end: number }[]> {
   const token = await getValidAccessToken();
   if (!token) return [];
-  const calendarId = await getSelectedCalendarId();
+  const calendarIds = Array.from(new Set(["primary", await getSelectedCalendarId()]));
 
-  // Build local-day start/end as UTC instants using the Europe/Amsterdam offset.
-  const timeMin = `${dateISO}T00:00:00`;
-  const timeMax = `${dateISO}T23:59:59`;
-
+  // Ask for a window padded by a day on each side (UTC) and clip each block to
+  // the local day afterwards, so all-day and overnight events are handled.
   const res = await fetch("https://www.googleapis.com/calendar/v3/freeBusy", {
     method: "POST",
     headers: {
@@ -196,34 +202,30 @@ export async function getGoogleBusyIntervals(dateISO: string): Promise<{ start: 
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      timeMin,
-      timeMax,
+      timeMin: `${shiftDate(dateISO, -1)}T00:00:00Z`,
+      timeMax: `${shiftDate(dateISO, 2)}T00:00:00Z`,
       timeZone: TZ,
-      items: [{ id: calendarId }],
+      items: calendarIds.map((id) => ({ id })),
     }),
   });
   if (!res.ok) {
-    console.error("[google-calendar] freeBusy failed", await res.text());
-    return [];
+    throw new Error(`Google freeBusy failed (${res.status}): ${await res.text()}`);
   }
   const data = (await res.json()) as {
-    calendars?: Record<string, { busy?: { start: string; end: string }[] }>;
+    calendars?: Record<string, { busy?: { start: string; end: string }[]; errors?: { reason?: string }[] }>;
   };
-  const busy = data.calendars?.[calendarId]?.busy ?? [];
-  return busy.map((b) => ({
-    start: isoTimeToMinutes(b.start),
-    end: isoTimeToMinutes(b.end),
-  }));
-}
 
-function isoTimeToMinutes(iso: string): number {
-  // iso like 2026-07-21T14:30:00+02:00 or ...Z — extract the local wall-clock time
-  // Google returns times already localized to the requested timeZone offset, so
-  // parsing the HH:MM directly from the string (ignoring offset conversion) gives
-  // the correct Europe/Amsterdam wall-clock minutes-of-day.
-  const match = iso.match(/T(\d{2}):(\d{2})/);
-  if (!match) return 0;
-  return Number(match[1]) * 60 + Number(match[2]);
+  const out: { start: number; end: number }[] = [];
+  for (const [id, cal] of Object.entries(data.calendars ?? {})) {
+    if (cal.errors?.length) {
+      console.error(`[google-calendar] freeBusy error for calendar ${id}:`, JSON.stringify(cal.errors));
+    }
+    for (const block of cal.busy ?? []) {
+      const clipped = busyBlockToMinutes(block, dateISO);
+      if (clipped) out.push(clipped);
+    }
+  }
+  return out;
 }
 
 const DAINE_EMAIL = "daiane.oakes@gmail.com";

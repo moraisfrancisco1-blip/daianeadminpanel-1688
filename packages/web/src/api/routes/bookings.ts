@@ -105,6 +105,22 @@ async function isSlotAvailable(date: string, startTime: string, durationMinutes:
   });
 }
 
+// Final check for public bookings: the slot list a client is looking at can be
+// minutes (or hours) old, so a time Daiane blocked on Google Calendar since then
+// must still be refused here. Fails open (logged) if Google can't be reached —
+// losing a booking over an API hiccup is worse than the rare double-up.
+async function overlapsGoogleBusy(date: string, startTime: string, durationMinutes: number): Promise<boolean> {
+  try {
+    const start = timeToMinutes(startTime);
+    const end = start + durationMinutes;
+    const busy = await getGoogleBusyIntervals(date);
+    return busy.some((b) => start < b.end + BUFFER_MIN && end > b.start - BUFFER_MIN);
+  } catch (err) {
+    console.error("[bookings] could not verify Google Calendar availability — allowing the booking", err);
+    return false;
+  }
+}
+
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
   return h! * 60 + (m ?? 0);
@@ -200,7 +216,10 @@ export const bookingsRoute = new Hono()
       return c.json({ message: "Date and time are required" }, 400);
     }
     const location = body.location === "amsterdam" ? "amsterdam" : "rotterdam";
-    if (!(await isSlotAvailable(body.date, body.startTime, service.durationMinutes, undefined, location))) {
+    if (
+      !(await isSlotAvailable(body.date, body.startTime, service.durationMinutes, undefined, location)) ||
+      (await overlapsGoogleBusy(body.date, body.startTime, service.durationMinutes))
+    ) {
       return c.json({ message: "The selected time is not available" }, 409);
     }
 
