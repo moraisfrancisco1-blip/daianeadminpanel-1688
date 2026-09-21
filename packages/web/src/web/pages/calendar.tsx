@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { Time24Input } from "../components/time-24-input";
+import { findConflicts } from "../lib/conflicts";
 import { api } from "../lib/api";
 import { Link, useLocation } from "wouter";
 import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse, Percent } from "lucide-react";
@@ -39,6 +40,9 @@ type BookingItem = {
 type GoogleBlock = { key: string; summary: string; calendar?: string; date: string; startTime: string; endTime: string; allDay: boolean };
 type BlockedSlot = { id: number; date: string; startTime: string; endTime: string; reason: string | null };
 type Service = { id: number; name: string; durationMinutes: number; price: number };
+
+// Stable reference so memoised work that depends on the blocks doesn't re-run every render while loading.
+const NO_GOOGLE_BLOCKS: GoogleBlock[] = [];
 
 const HOUR_START = 8;
 const HOUR_END = 19;
@@ -187,7 +191,7 @@ function CalendarContent() {
       return data as { connected: boolean; blocks: GoogleBlock[]; error?: string };
     },
   });
-  const googleBlocks = googleQ.data?.blocks ?? [];
+  const googleBlocks = googleQ.data?.blocks ?? NO_GOOGLE_BLOCKS;
   const googleProblem = googleQ.isError || !!googleQ.data?.error;
 
   const durationMap = useMemo(() => {
@@ -196,6 +200,13 @@ function CalendarContent() {
     for (const s of list) m.set(s.id, s.durationMinutes);
     return m;
   }, [servicesQ.data]);
+
+  // Things that are on top of each other (a booking over a Google event, or two bookings) in the range on screen.
+  const conflicts = useMemo(
+    () =>
+      findConflicts(bookingsQ.data ?? [], googleBlocks, (id) => durationMap.get(id ?? -1) ?? 60, toISODate(new Date()), range.from, range.to),
+    [bookingsQ.data, googleBlocks, durationMap, range],
+  );
 
   const updateBooking = useMutation({
     mutationFn: async (p: { id: number; data: any }) =>
@@ -338,6 +349,23 @@ function CalendarContent() {
         </p>
       )}
 
+      {conflicts.items.length > 0 && (
+        <div className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+          <p className="flex items-center gap-1.5 font-medium">
+            <AlertTriangle className="size-4 shrink-0" />
+            {conflicts.items.length === 1 ? "1 conflito nesta vista" : `${conflicts.items.length} conflitos nesta vista`} — duas coisas na mesma hora:
+          </p>
+          <ul className="mt-1 ml-5 list-disc space-y-0.5">
+            {conflicts.items.slice(0, 5).map((c, i) => (
+              <li key={i}>
+                {new Date(`${c.date}T00:00:00`).toLocaleDateString("pt-PT", { weekday: "short", day: "numeric", month: "short" })} {c.time} · {c.text}
+              </li>
+            ))}
+            {conflicts.items.length > 5 && <li>… e mais {conflicts.items.length - 5}</li>}
+          </ul>
+        </div>
+      )}
+
       {bookingsQ.isLoading || servicesQ.isLoading ? (
         <div className="h-96 rounded-xl bg-muted animate-pulse" />
       ) : view === "month" ? (
@@ -346,6 +374,7 @@ function CalendarContent() {
           bookings={bookingsQ.data ?? []}
           blocked={blockedQ.data ?? []}
           googleBlocks={googleBlocks}
+          conflictDates={conflicts.dates}
           onSelectDay={(d) => {
             setCursor(d);
             setView("day");
@@ -359,6 +388,8 @@ function CalendarContent() {
           bookings={bookingsQ.data ?? []}
           blocked={blockedQ.data ?? []}
           googleBlocks={googleBlocks}
+          conflictBookingIds={conflicts.bookingIds}
+          conflictGoogleKeys={conflicts.googleKeys}
           durationMap={durationMap}
           onSelectBooking={setSelectedBooking}
           onDeleteBlock={deleteBlock.mutate}
@@ -406,13 +437,15 @@ function TimeGrid(props: {
   bookings: BookingItem[];
   blocked: BlockedSlot[];
   googleBlocks: GoogleBlock[];
+  conflictBookingIds: Set<number>;
+  conflictGoogleKeys: Set<string>;
   durationMap: Map<number, number>;
   onSelectBooking: (b: BookingItem) => void;
   onDeleteBlock: (id: number) => void;
   onCreateBooking: (date: string, time: string) => void;
   onReschedule: (bookingId: number, date: string, startTime: string) => void;
 }) {
-  const { view, cursor, bookings, blocked, googleBlocks, durationMap, onSelectBooking, onDeleteBlock, onCreateBooking, onReschedule } = props;
+  const { view, cursor, bookings, blocked, googleBlocks, conflictBookingIds, conflictGoogleKeys, durationMap, onSelectBooking, onDeleteBlock, onCreateBooking, onReschedule } = props;
   const days = view === "day" ? [cursor] : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(cursor), i));
 
   const top = (t: string) => ((timeToMin(t) - HOUR_START * 60) / 60) * HOUR_HEIGHT;
@@ -502,7 +535,9 @@ function TimeGrid(props: {
                     <div
                       key={g.key}
                       onDoubleClick={(e) => e.stopPropagation()}
-                      className="absolute left-0.5 right-0.5 rounded bg-sky-100/90 border border-sky-300 px-1 overflow-hidden pointer-events-auto"
+                      className={`absolute left-0.5 right-0.5 rounded bg-sky-100/90 border border-sky-300 px-1 overflow-hidden pointer-events-auto ${
+                        conflictGoogleKeys.has(g.key) ? "ring-2 ring-red-500" : ""
+                      }`}
                       style={{ top: top(minToTime(startMin)), height: height(endMin - startMin) }}
                       title={`Google Calendar${g.calendar ? ` (${g.calendar})` : ""} · ${g.summary} · ${g.allDay ? "dia inteiro" : `${g.startTime}–${g.endTime}`}`}
                     >
@@ -533,6 +568,7 @@ function TimeGrid(props: {
                   const isLocked = isCancelled || isNoShow;
                   const style = STATUS_STYLES[b.status] ?? "bg-neutral-500 text-white border-neutral-500";
                   const isDragging = drag?.bookingId === b.id;
+                  const inConflict = conflictBookingIds.has(b.id);
                   return (
                     <button
                       key={b.id}
@@ -601,8 +637,9 @@ function TimeGrid(props: {
                       onPointerCancel={() => setDrag((d) => (d?.bookingId === b.id ? null : d))}
                       className={`absolute left-0.5 right-0.5 rounded border overflow-hidden shadow-sm text-left ${
                         isLocked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"
-                      } ${isDragging ? "opacity-30" : ""}`}
+                      } ${isDragging ? "opacity-30" : ""} ${inConflict ? "ring-2 ring-red-500 z-[5]" : ""}`}
                       style={{ top: top(b.startTime), height: height(dur), touchAction: isLocked ? "auto" : "none" }}
+                      title={inConflict ? "Conflito: há outra coisa nesta hora" : undefined}
                     >
                       <div className={`absolute inset-0 ${style} ${isCancelled ? "opacity-40" : ""}`} />
                       <div className="relative px-1.5 py-1">
@@ -616,6 +653,7 @@ function TimeGrid(props: {
                         {!isCancelled && !isNoShow && (
                           <>
                             <p className="text-[11px] font-semibold truncate">
+                              {inConflict ? "⚠ " : ""}
                               {b.startTime} · {b.name}
                             </p>
                             {dur >= 45 && <p className="text-[10px] opacity-90 truncate">{b.serviceName}</p>}
@@ -644,8 +682,15 @@ function TimeGrid(props: {
   );
 }
 
-function MonthView(props: { cursor: Date; bookings: BookingItem[]; blocked: BlockedSlot[]; googleBlocks: GoogleBlock[]; onSelectDay: (d: Date) => void }) {
-  const { cursor, bookings, blocked, googleBlocks, onSelectDay } = props;
+function MonthView(props: {
+  cursor: Date;
+  bookings: BookingItem[];
+  blocked: BlockedSlot[];
+  googleBlocks: GoogleBlock[];
+  conflictDates: Set<string>;
+  onSelectDay: (d: Date) => void;
+}) {
+  const { cursor, bookings, blocked, googleBlocks, conflictDates, onSelectDay } = props;
   const firstOfMonth = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const gridStart = startOfWeek(firstOfMonth);
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
@@ -689,6 +734,11 @@ function MonthView(props: { cursor: Date; bookings: BookingItem[]; blocked: Bloc
               {hasBlock && (
                 <div className="mt-0.5">
                   <span className="inline-block text-[10px] bg-neutral-300 text-neutral-700 rounded px-1">bloqueio</span>
+                </div>
+              )}
+              {conflictDates.has(iso) && (
+                <div className="mt-0.5">
+                  <span className="inline-block text-[10px] bg-red-100 text-red-800 border border-red-300 rounded px-1">⚠ conflito</span>
                 </div>
               )}
               {hasGoogle && (
