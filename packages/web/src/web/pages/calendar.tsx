@@ -739,7 +739,15 @@ function BookingDetailModal(props: {
     setGenerateInvoiceLoading(true);
     setGenerateInvoiceError(null);
     try {
-      const res = await fetch(`/api/bookings/${booking.id}/generate-invoice`, { method: "POST" });
+      // Send the discount as currently shown — the invoice must not depend on having pressed "Guardar" first.
+      const res = await fetch(`/api/bookings/${booking.id}/generate-invoice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          discountType: discountType || null,
+          discountValue: discountType && discountValue ? Number(discountValue) : null,
+        }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to generate invoice");
       setGeneratedInvoice(data.invoice);
@@ -991,6 +999,16 @@ function BookingDetailModal(props: {
             </button>
             {generateInvoiceError && <p className="text-sm text-destructive">{generateInvoiceError}</p>}
           </div>
+        )}
+
+        {effectiveInvoiceId && (
+          <p className="border-t pt-3 text-xs text-muted-foreground">
+            Já existe uma fatura para esta reserva. Para alterar valores (por exemplo aplicar um desconto), edita a fatura em{" "}
+            <Link to="/invoices" className="text-brand-teal hover:underline">
+              Invoices
+            </Link>
+            .
+          </p>
         )}
 
         {effectiveInvoice && (

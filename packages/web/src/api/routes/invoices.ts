@@ -451,6 +451,22 @@ export const invoicesRoute = new Hono()
       body.clientId != null &&
       Number(body.clientId) !== prevInvoice.clientId;
 
+    // A payment link created before this edit still charges the OLD amount (the
+    // checkout session is reused as-is), so when the total changes on an unpaid
+    // invoice, retire it — a fresh link at the new amount is made on demand.
+    const staleCheckoutSessionId =
+      prevInvoice && prevInvoice.status !== "paid" && prevInvoice.stripeCheckoutSessionId && prevInvoice.total !== total
+        ? prevInvoice.stripeCheckoutSessionId
+        : null;
+    if (staleCheckoutSessionId && stripe) {
+      try {
+        await stripe.checkout.sessions.expire(staleCheckoutSessionId);
+      } catch (err) {
+        // Already expired/completed — nothing to retire; the link is dropped from the invoice below anyway.
+        console.warn("[invoices] could not expire old checkout session", staleCheckoutSessionId, err);
+      }
+    }
+
     const [invoice] = await db
       .update(invoices)
       .set({
@@ -464,6 +480,7 @@ export const invoicesRoute = new Hono()
         vatTotal,
         total,
         paidAt: body.status === "paid" ? (body.paidAt ? new Date(body.paidAt) : new Date()) : null,
+        ...(staleCheckoutSessionId ? { stripeCheckoutSessionId: null, stripeCheckoutStatus: null } : {}),
         ...(isRepurposedCancelled
           ? {
               bookingId: null,
@@ -541,5 +558,8 @@ export const invoicesRoute = new Hono()
     await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, id));
     await db.delete(payments).where(eq(payments.invoiceId, id));
     await db.delete(invoices).where(eq(invoices.id, id));
+    // Without this the booking keeps pointing at a deleted invoice, which hides
+    // "Generate invoice" and breaks "Send invoice" for it.
+    await db.update(bookings).set({ invoiceId: null }).where(eq(bookings.invoiceId, id));
     return c.json({ success: true }, 200);
   });

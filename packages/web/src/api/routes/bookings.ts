@@ -7,7 +7,7 @@ import { stripe } from "../services/stripe";
 import { sendTrackedEmail } from "../services/email-log";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildRemainderPaymentEmailHtml } from "../lib/email-templates";
 import { nextNumber } from "../lib/counters";
-import { computeTotals, computeDiscountAmount, discountLineInput, type LineInput, type DiscountType } from "../lib/totals";
+import { computeTotals, computeDiscountAmount, discountLineInput, parseDiscount, type LineInput, type DiscountType } from "../lib/totals";
 import { invoiceDescriptionForService } from "../lib/invoice-description";
 import { COMPANY } from "../lib/company";
 import { changeInvoiceStatus } from "../services/invoice-activity";
@@ -492,8 +492,7 @@ export const bookingsRoute = new Hono()
     // derived from the day the admin picked (Tue/Thu = Amsterdam).
     const location = locationForDay(new Date(`${body.date}T00:00:00`).getDay());
 
-    const discountType: DiscountType | null = body.discountType === "percent" || body.discountType === "fixed" ? body.discountType : null;
-    const discountValue = discountType && body.discountValue != null ? Number(body.discountValue) : null;
+    const { discountType, discountValue } = parseDiscount(body);
 
     const [booking] = await db
       .insert(bookings)
@@ -713,14 +712,10 @@ export const bookingsRoute = new Hono()
     // Discount fields are only touched when the caller actually sends them —
     // the drag-to-reschedule action only sends { date, startTime } and must
     // never wipe out a discount set earlier through the edit modal.
-    const discountType: DiscountType | null =
-      "discountType" in body
-        ? body.discountType === "percent" || body.discountType === "fixed"
-          ? body.discountType
-          : null
-        : (existing.discountType as DiscountType | null);
-    const discountValue =
-      "discountValue" in body ? (body.discountValue != null ? Number(body.discountValue) : null) : existing.discountValue;
+    const touchesDiscount = "discountType" in body || "discountValue" in body;
+    const { discountType, discountValue } = touchesDiscount
+      ? parseDiscount(body)
+      : { discountType: existing.discountType as DiscountType | null, discountValue: existing.discountValue };
 
     const [booking] = await db
       .update(bookings)
@@ -773,6 +768,17 @@ export const bookingsRoute = new Hono()
     if (!booking) return c.json({ message: "Booking not found" }, 404);
     if (booking.invoiceId) return c.json({ message: "This booking already has an invoice" }, 400);
 
+    // The modal sends whatever discount is on screen — it must not depend on the
+    // admin having pressed Save first. No body / no discount keys = use what's stored.
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const touchesDiscount = "discountType" in body || "discountValue" in body;
+    const { discountType, discountValue } = touchesDiscount
+      ? parseDiscount(body)
+      : { discountType: booking.discountType as DiscountType | null, discountValue: booking.discountValue };
+    if (touchesDiscount) {
+      await db.update(bookings).set({ discountType, discountValue }).where(eq(bookings.id, id));
+    }
+
     let clientId = booking.clientId;
     if (!clientId) {
       let [client] = await db.select().from(clients).where(eq(clients.email, booking.email));
@@ -793,7 +799,7 @@ export const bookingsRoute = new Hono()
     const lineInputs: LineInput[] = [
       { description: invoiceDescriptionForService(service), serviceId: service.id, quantity: 1, unitPrice: service.price, vatRate },
     ];
-    const discountLine = discountLineInput(service.price, vatRate, booking.discountType as DiscountType | null, booking.discountValue);
+    const discountLine = discountLineInput(service.price, vatRate, discountType, discountValue);
     if (discountLine) lineInputs.push(discountLine);
 
     const { lineItems, subtotal, vatTotal, total } = computeTotals(lineInputs);

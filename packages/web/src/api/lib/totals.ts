@@ -95,6 +95,21 @@ export function computeTotals(items: LineInput[]) {
 export type DiscountType = "percent" | "fixed";
 
 /**
+ * Normalises a discount coming from a request body: a valid type plus a
+ * positive, finite value, otherwise "no discount" (both null). Percentages are
+ * capped at 100.
+ */
+export function parseDiscount(input: { discountType?: unknown; discountValue?: unknown }): {
+  discountType: DiscountType | null;
+  discountValue: number | null;
+} {
+  const type = input.discountType === "percent" || input.discountType === "fixed" ? input.discountType : null;
+  const value = input.discountValue == null || input.discountValue === "" ? NaN : Number(input.discountValue);
+  if (!type || !Number.isFinite(value) || value <= 0) return { discountType: null, discountValue: null };
+  return { discountType: type, discountValue: type === "percent" ? Math.min(value, 100) : value };
+}
+
+/**
  * GROSS discount amount for a service price, clamped to [0, servicePrice] so
  * a discount can never flip a line item negative overall.
  */

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { computeVat, computeTotals, vatBreakdownFromNet, netToGross, round2, computeDiscountAmount, discountLineInput } from "./totals";
+import { computeVat, computeTotals, vatBreakdownFromNet, netToGross, round2, computeDiscountAmount, discountLineInput, parseDiscount } from "./totals";
 
 describe("computeVat", () => {
   test("splits a gross amount into net + VAT at 9%", () => {
@@ -85,6 +85,30 @@ describe("round2", () => {
   test("rounds to 2 decimal places", () => {
     expect(round2(10 / 3)).toBe(3.33);
     expect(round2(9.999)).toBe(10);
+  });
+});
+
+describe("parseDiscount", () => {
+  test("accepts a valid type with a positive value (numbers or numeric strings)", () => {
+    expect(parseDiscount({ discountType: "fixed", discountValue: 15 })).toEqual({ discountType: "fixed", discountValue: 15 });
+    expect(parseDiscount({ discountType: "percent", discountValue: "10" })).toEqual({ discountType: "percent", discountValue: 10 });
+  });
+
+  test("anything incomplete or invalid means no discount", () => {
+    const none = { discountType: null, discountValue: null };
+    expect(parseDiscount({})).toEqual(none);
+    expect(parseDiscount({ discountType: "fixed" })).toEqual(none);
+    expect(parseDiscount({ discountType: "fixed", discountValue: null })).toEqual(none);
+    expect(parseDiscount({ discountType: "fixed", discountValue: "" })).toEqual(none);
+    expect(parseDiscount({ discountType: "fixed", discountValue: 0 })).toEqual(none);
+    expect(parseDiscount({ discountType: "fixed", discountValue: -5 })).toEqual(none);
+    expect(parseDiscount({ discountType: "fixed", discountValue: "abc" })).toEqual(none);
+    expect(parseDiscount({ discountType: "bogus", discountValue: 10 })).toEqual(none);
+    expect(parseDiscount({ discountType: null, discountValue: 10 })).toEqual(none);
+  });
+
+  test("caps a percentage at 100", () => {
+    expect(parseDiscount({ discountType: "percent", discountValue: 250 })).toEqual({ discountType: "percent", discountValue: 100 });
   });
 });
 
