@@ -176,6 +176,11 @@ export const bookings = sqliteTable("bookings", {
   name: text("name").notNull(),
   email: text("email").notNull(),
   phone: text("phone"),
+  // Contact details given at online booking time (the person may not be a client yet).
+  address: text("address"),
+  zipCode: text("zip_code"),
+  city: text("city"),
+  country: text("country"),
   serviceId: integer("service_id").notNull(),
   date: text("date").notNull(), // YYYY-MM-DD
   startTime: text("start_time").notNull(), // HH:MM

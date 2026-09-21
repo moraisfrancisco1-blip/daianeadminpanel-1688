@@ -9,6 +9,8 @@ import { nextNumber } from "../lib/counters";
 import { computeVat, DEFAULT_VAT_RATE } from "../lib/totals";
 import { invoiceDescriptionForService } from "../lib/invoice-description";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildPaymentConfirmationHtml } from "../lib/email-templates";
+import { findOrCreateClientForBooking } from "../lib/booking-client";
+import { formatAddress, calendarEventDescription } from "../lib/booking-details";
 import { sendTrackedEmail } from "../services/email-log";
 import { changeInvoiceStatus, recordInvoiceActivity } from "../services/invoice-activity";
 import { COMPANY } from "../lib/company";
@@ -555,10 +557,7 @@ stripeWebhookRoute.post("/", async (c) => {
         }
 
         // Find or create client
-        let [client] = await db.select().from(clients).where(eq(clients.email, booking.email));
-        if (!client) {
-          [client] = await db.insert(clients).values({ name: booking.name, email: booking.email, phone: booking.phone }).returning();
-        }
+        const client = await findOrCreateClientForBooking(booking);
         await db.update(bookings).set({ clientId: client!.id }).where(eq(bookings.id, bookingId));
 
         // Create the Admin invoice (source of truth) for the booking deposit.
@@ -643,6 +642,7 @@ stripeWebhookRoute.post("/", async (c) => {
             clientName: booking.name,
             clientEmail: booking.email,
             clientPhone: booking.phone,
+            clientAddress: formatAddress(booking),
             serviceName: service?.name ?? "Session",
             date: booking.date,
             startTime: booking.startTime,
@@ -656,7 +656,7 @@ stripeWebhookRoute.post("/", async (c) => {
           const eventId = await createCalendarEvent({
             bookingId: booking.id,
             summary: `${service?.name ?? "Session"} — ${booking.name}`,
-            description: `Nome: ${booking.name}\nServiço: ${service?.name ?? "Session"}\nTelefone: ${booking.phone ?? "—"}`,
+            description: calendarEventDescription({ ...booking, serviceName: service?.name ?? "Session" }),
             date: booking.date,
             startTime: booking.startTime,
             durationMinutes: service?.durationMinutes ?? 60,

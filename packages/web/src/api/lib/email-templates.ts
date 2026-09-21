@@ -330,10 +330,15 @@ export function buildReminderEmailHtml(opts: {
 // ============================================================================
 // ADMIN EMAILS
 // ============================================================================
+// Booking details are typed into a public form, so anything from there is escaped before it goes into HTML.
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
 export function buildAdminNewBookingHtml(opts: {
   clientName: string;
   clientEmail: string;
   clientPhone?: string | null;
+  clientAddress?: string | null;
   serviceName: string;
   date: string;
   startTime: string;
@@ -343,8 +348,9 @@ export function buildAdminNewBookingHtml(opts: {
   return wrapper(`
     <p><strong>New booking confirmed 🎉</strong></p>
     <p>
-      <strong>${opts.clientName}</strong> (${opts.clientEmail}${opts.clientPhone ? `, ${opts.clientPhone}` : ""})<br/>
-      ${opts.serviceName} — ${opts.date} at ${opts.startTime}<br/>
+      <strong>${escapeHtml(opts.clientName)}</strong> (${escapeHtml(opts.clientEmail)}${opts.clientPhone ? `, ${escapeHtml(opts.clientPhone)}` : ""})<br/>
+      ${opts.clientAddress ? `${escapeHtml(opts.clientAddress)}<br/>` : ""}
+      ${escapeHtml(opts.serviceName)} — ${opts.date} at ${opts.startTime}<br/>
       ${opts.amount === 0 ? "Free session — no payment required." : `${opts.payFullNow ? "Paid in full" : "Deposit paid"}: €${opts.amount.toFixed(2)}`}
     </p>
   `);

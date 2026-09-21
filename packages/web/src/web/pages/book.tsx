@@ -12,6 +12,33 @@ import { LocationSection } from "../components/book/location-section";
 import { ServiceSelector } from "../components/book/service-selector";
 import { TermsCheckbox } from "../components/book/terms-checkbox";
 import { isCoffeeTalkService } from "../../api/lib/coffee-talk";
+import { validateBookingDetails, type BookingDetailField } from "../../api/lib/booking-details";
+
+const COUNTRY_SUGGESTIONS = ["Netherlands", "Belgium", "Germany", "Portugal", "Brazil", "Spain", "France", "United Kingdom"];
+
+const EMPTY_DETAILS: Record<BookingDetailField, string> = {
+  name: "", email: "", phone: "", address: "", zipCode: "", city: "", country: "",
+};
+
+// A labelled, required field with its own error line.
+function BookingField(props: { id: string; label: string; error?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label htmlFor={props.id} className="text-sm font-medium mb-1 block text-brand-teal">
+        {props.label} <span className="text-destructive" aria-hidden="true">*</span>
+      </label>
+      {props.children}
+      {props.error && (
+        <p id={`${props.id}-error`} className="text-xs text-destructive mt-1">
+          {props.error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+const inputClass = (invalid: boolean) =>
+  `w-full h-10 px-3 rounded-md border bg-background text-sm ${invalid ? "border-destructive" : "border-input"}`;
 
 const LOCATION_DAYS: Record<"rotterdam" | "amsterdam", number[]> = {
   rotterdam: [1, 3, 5],
@@ -35,9 +62,9 @@ export default function BookPage() {
   const [location, setLocation] = useState<"rotterdam" | "amsterdam">("rotterdam");
   const [date, setDate] = useState<string>("");
   const [time, setTime] = useState<string>("");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [details, setDetails] = useState(EMPTY_DETAILS);
+  const [touched, setTouched] = useState<Partial<Record<BookingDetailField, boolean>>>({});
+  const [attempted, setAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmedFree, setConfirmedFree] = useState(false);
   const [error, setError] = useState("");
@@ -92,13 +119,37 @@ export default function BookPage() {
     }
   }, [serviceId]);
 
+  const validation = validateBookingDetails(details);
+  // An error shows once a field has been left, or after trying to submit.
+  const errorFor = (f: BookingDetailField) => (attempted || touched[f] ? validation.errors[f] : undefined);
+  const setField = (f: BookingDetailField) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setDetails((d) => ({ ...d, [f]: e.target.value }));
+  const touch = (f: BookingDetailField) => () => setTouched((t) => ({ ...t, [f]: true }));
+  const fieldProps = (f: BookingDetailField, autoComplete: string) => ({
+    id: `book-${f}`,
+    value: details[f],
+    onChange: setField(f),
+    onBlur: touch(f),
+    autoComplete,
+    required: true,
+    "aria-invalid": errorFor(f) ? true : undefined,
+    "aria-describedby": errorFor(f) ? `book-${f}-error` : undefined,
+    className: inputClass(!!errorFor(f)),
+  });
+
   async function handleSubmit() {
-    if (!serviceId || !date || !time || !name || !email || !termsAccepted) return;
+    if (!serviceId || !date || !time || !termsAccepted) return;
+    setAttempted(true);
+    if (!validation.ok) {
+      setError("Please fill in all the required details.");
+      requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
       const res = await api.bookings.$post({
-        json: { serviceId, date, startTime: time, location, payFullNow: true, name, email, phone },
+        json: { serviceId, date, startTime: time, location, payFullNow: true, ...validation.values },
       });
       const data = await res.json();
       if (!res.ok) {
@@ -239,25 +290,39 @@ export default function BookPage() {
               )}
 
               <div className="grid grid-cols-1 gap-3">
-                <input
-                  placeholder="Full name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                />
-                <input
-                  placeholder="Email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                />
-                <input
-                  placeholder="Phone (optional)"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                />
+                <BookingField id="book-name" label="Full name" error={errorFor("name")}>
+                  <input aria-label="Full name" placeholder="First and last name" {...fieldProps("name", "name")} />
+                </BookingField>
+                <BookingField id="book-email" label="Email" error={errorFor("email")}>
+                  <input aria-label="Email" type="email" inputMode="email" placeholder="you@example.com" {...fieldProps("email", "email")} />
+                </BookingField>
+                <BookingField id="book-phone" label="Phone" error={errorFor("phone")}>
+                  <input aria-label="Phone" type="tel" inputMode="tel" placeholder="+31 6 12345678" {...fieldProps("phone", "tel")} />
+                </BookingField>
+                <BookingField id="book-address" label="Street and house number" error={errorFor("address")}>
+                  <input aria-label="Street and house number" placeholder="Street 12" {...fieldProps("address", "address-line1")} />
+                </BookingField>
+                <div className="grid grid-cols-[1fr_1.6fr] gap-3">
+                  <BookingField id="book-zipCode" label="Postcode" error={errorFor("zipCode")}>
+                    <input aria-label="Postcode" placeholder="1234 AB" {...fieldProps("zipCode", "postal-code")} />
+                  </BookingField>
+                  <BookingField id="book-city" label="City" error={errorFor("city")}>
+                    <input aria-label="City" placeholder="Rotterdam" {...fieldProps("city", "address-level2")} />
+                  </BookingField>
+                </div>
+                <BookingField id="book-country" label="Country" error={errorFor("country")}>
+                  <input aria-label="Country" list="book-country-options" placeholder="Netherlands" {...fieldProps("country", "country-name")} />
+                </BookingField>
+                <datalist id="book-country-options" aria-label="Country suggestions">
+                  {COUNTRY_SUGGESTIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </datalist>
+                <p className="text-xs text-muted-foreground">
+                  All fields are required. We use your details for your booking confirmation and invoice.
+                </p>
               </div>
 
               {!isFree && (
@@ -282,7 +347,7 @@ export default function BookPage() {
 
               <Button
                 className="w-full bg-brand-copper hover:bg-brand-copper/90 text-white tracking-wide"
-                disabled={!serviceId || !date || !time || !name || !email || !termsAccepted || submitting}
+                disabled={!serviceId || !date || !time || !termsAccepted || submitting}
                 onClick={handleSubmit}
               >
                 <Sparkles className="size-4" />

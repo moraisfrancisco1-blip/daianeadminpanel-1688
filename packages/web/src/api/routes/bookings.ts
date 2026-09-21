@@ -16,6 +16,8 @@ import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/what
 import { recordAudit, actorFromContext } from "../lib/audit";
 import { shiftDate } from "../lib/busy-intervals";
 import { schedulingLocation } from "../lib/coffee-talk";
+import { validateBookingDetails, calendarEventDescription, formatAddress } from "../lib/booking-details";
+import { findOrCreateClientForBooking } from "../lib/booking-client";
 
 const BUFFER_MIN = 0; // no artificial gap between sessions — only real overlap is blocked
 const SLOT_GRANULARITY_MIN = 15;
@@ -214,6 +216,13 @@ export const bookingsRoute = new Hono()
   // Public: create a booking (pending deposit) + Stripe checkout session
   .post("/", async (c) => {
     const body = await c.req.json();
+
+    // Every online booking must come with full contact details (full name, email, phone, address).
+    const details = validateBookingDetails(body);
+    if (!details.ok) {
+      return c.json({ message: "Please fill in all the required details.", errors: details.errors }, 400);
+    }
+    const contact = details.values;
     const [service] = await db.select().from(services).where(eq(services.id, body.serviceId));
     if (!service) return c.json({ message: "Invalid service" }, 400);
 
@@ -237,9 +246,13 @@ export const bookingsRoute = new Hono()
       const [booking] = await db
         .insert(bookings)
         .values({
-          name: body.name,
-          email: body.email,
-          phone: body.phone ?? null,
+          name: contact.name,
+          email: contact.email,
+          phone: contact.phone,
+          address: contact.address,
+          zipCode: contact.zipCode,
+          city: contact.city,
+          country: contact.country,
           serviceId: body.serviceId,
           date: body.date,
           startTime: body.startTime,
@@ -252,13 +265,7 @@ export const bookingsRoute = new Hono()
         })
         .returning();
 
-      let [client] = await db.select().from(clients).where(eq(clients.email, booking!.email));
-      if (!client) {
-        [client] = await db
-          .insert(clients)
-          .values({ name: booking!.name, email: booking!.email, phone: booking!.phone })
-          .returning();
-      }
+      await findOrCreateClientForBooking(booking!);
 
       await sendTrackedEmail({
         to: booking!.email,
@@ -284,6 +291,7 @@ export const bookingsRoute = new Hono()
           clientName: booking!.name,
           clientEmail: booking!.email,
           clientPhone: booking!.phone,
+          clientAddress: formatAddress(booking!),
           serviceName: service.name,
           date: booking!.date,
           startTime: booking!.startTime,
@@ -312,9 +320,13 @@ export const bookingsRoute = new Hono()
     const [booking] = await db
       .insert(bookings)
       .values({
-        name: body.name,
-        email: body.email,
-        phone: body.phone ?? null,
+        name: contact.name,
+        email: contact.email,
+        phone: contact.phone,
+        address: contact.address,
+        zipCode: contact.zipCode,
+        city: contact.city,
+        country: contact.country,
         serviceId: body.serviceId,
         date: body.date,
         startTime: body.startTime,
@@ -336,13 +348,7 @@ export const bookingsRoute = new Hono()
         .set({ status: "confirmed", depositStatus: "unpaid" })
         .where(eq(bookings.id, booking!.id));
 
-      let [client] = await db.select().from(clients).where(eq(clients.email, booking!.email));
-      if (!client) {
-        [client] = await db
-          .insert(clients)
-          .values({ name: booking!.name, email: booking!.email, phone: booking!.phone })
-          .returning();
-      }
+      await findOrCreateClientForBooking(booking!);
 
       await sendTrackedEmail({
         to: booking!.email,
@@ -368,6 +374,7 @@ export const bookingsRoute = new Hono()
           clientName: booking!.name,
           clientEmail: booking!.email,
           clientPhone: booking!.phone,
+          clientAddress: formatAddress(booking!),
           serviceName: service.name,
           date: booking!.date,
           startTime: booking!.startTime,
@@ -635,6 +642,7 @@ export const bookingsRoute = new Hono()
         clientName: booking!.name,
         clientEmail: booking!.email,
         clientPhone: booking!.phone,
+          clientAddress: formatAddress(booking!),
         serviceName: service.name,
         date: booking!.date,
         startTime: booking!.startTime,
@@ -751,7 +759,7 @@ export const bookingsRoute = new Hono()
       await updateCalendarEvent({
         eventId: existing.googleEventId,
         summary: `${service.name} — ${booking!.name}`,
-        description: `Nome: ${booking!.name}\nServiço: ${service.name}\nTelefone: ${booking!.phone ?? "—"}`,
+        description: calendarEventDescription({ ...booking!, serviceName: service.name }),
         date,
         startTime,
         durationMinutes: service.durationMinutes,
@@ -787,14 +795,8 @@ export const bookingsRoute = new Hono()
 
     let clientId = booking.clientId;
     if (!clientId) {
-      let [client] = await db.select().from(clients).where(eq(clients.email, booking.email));
-      if (!client) {
-        [client] = await db
-          .insert(clients)
-          .values({ name: booking.name, email: booking.email, phone: booking.phone })
-          .returning();
-      }
-      clientId = client!.id;
+      const client = await findOrCreateClientForBooking(booking);
+      clientId = client.id;
       await db.update(bookings).set({ clientId }).where(eq(bookings.id, id));
     }
 
@@ -1017,7 +1019,18 @@ export const bookingsRoute = new Hono()
  * No-ops silently if Google Calendar isn't connected — never blocks the booking flow.
  */
 async function syncBookingToGoogleCalendar(
-  booking: { id: number; name: string; email: string; phone: string | null; date: string; startTime: string },
+  booking: {
+    id: number;
+    name: string;
+    email: string;
+    phone: string | null;
+    address?: string | null;
+    zipCode?: string | null;
+    city?: string | null;
+    country?: string | null;
+    date: string;
+    startTime: string;
+  },
   serviceName: string,
   durationMinutes: number,
 ) {
@@ -1025,7 +1038,7 @@ async function syncBookingToGoogleCalendar(
     const eventId = await createCalendarEvent({
       bookingId: booking.id,
       summary: `${serviceName} — ${booking.name}`,
-      description: `Nome: ${booking.name}\nServiço: ${serviceName}\nTelefone: ${booking.phone ?? "—"}`,
+      description: calendarEventDescription({ ...booking, serviceName }),
       date: booking.date,
       startTime: booking.startTime,
       durationMinutes,
