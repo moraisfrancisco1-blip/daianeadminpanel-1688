@@ -36,6 +36,7 @@ type BookingItem = {
   notes: string | null;
 };
 
+type GoogleBlock = { key: string; summary: string; date: string; startTime: string; endTime: string; allDay: boolean };
 type BlockedSlot = { id: number; date: string; startTime: string; endTime: string; reason: string | null };
 type Service = { id: number; name: string; durationMinutes: number; price: number };
 
@@ -173,6 +174,21 @@ function CalendarContent() {
       return (data as { blocked: BlockedSlot[] }).blocked;
     },
   });
+
+  // Time Daiane has blocked on Google Calendar (personal events etc.) — the same
+  // times the public booking page hides. Read-only; edited in Google itself.
+  const googleQ = useQuery({
+    queryKey: ["google-busy", range.from, range.to],
+    staleTime: 60_000,
+    queryFn: async (): Promise<{ connected: boolean; blocks: GoogleBlock[]; error?: string }> => {
+      const res = await api.bookings["google-busy"].$get({ query: { from: range.from, to: range.to } });
+      const data = await res.json();
+      if (!res.ok) throw new Error("Failed to load Google Calendar");
+      return data as { connected: boolean; blocks: GoogleBlock[]; error?: string };
+    },
+  });
+  const googleBlocks = googleQ.data?.blocks ?? [];
+  const googleProblem = googleQ.isError || !!googleQ.data?.error;
 
   const durationMap = useMemo(() => {
     const m = new Map<number, number>();
@@ -315,6 +331,13 @@ function CalendarContent() {
         </div>
       </div>
 
+      {googleProblem && (
+        <p className="flex items-center gap-1.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+          <AlertTriangle className="size-4 shrink-0" />
+          Não foi possível ler o Google Calendar — os horários bloqueados lá podem não aparecer aqui.
+        </p>
+      )}
+
       {bookingsQ.isLoading || servicesQ.isLoading ? (
         <div className="h-96 rounded-xl bg-muted animate-pulse" />
       ) : view === "month" ? (
@@ -322,6 +345,7 @@ function CalendarContent() {
           cursor={cursor}
           bookings={bookingsQ.data ?? []}
           blocked={blockedQ.data ?? []}
+          googleBlocks={googleBlocks}
           onSelectDay={(d) => {
             setCursor(d);
             setView("day");
@@ -334,6 +358,7 @@ function CalendarContent() {
           cursor={cursor}
           bookings={bookingsQ.data ?? []}
           blocked={blockedQ.data ?? []}
+          googleBlocks={googleBlocks}
           durationMap={durationMap}
           onSelectBooking={setSelectedBooking}
           onDeleteBlock={deleteBlock.mutate}
@@ -380,13 +405,14 @@ function TimeGrid(props: {
   cursor: Date;
   bookings: BookingItem[];
   blocked: BlockedSlot[];
+  googleBlocks: GoogleBlock[];
   durationMap: Map<number, number>;
   onSelectBooking: (b: BookingItem) => void;
   onDeleteBlock: (id: number) => void;
   onCreateBooking: (date: string, time: string) => void;
   onReschedule: (bookingId: number, date: string, startTime: string) => void;
 }) {
-  const { view, cursor, bookings, blocked, durationMap, onSelectBooking, onDeleteBlock, onCreateBooking, onReschedule } = props;
+  const { view, cursor, bookings, blocked, googleBlocks, durationMap, onSelectBooking, onDeleteBlock, onCreateBooking, onReschedule } = props;
   const days = view === "day" ? [cursor] : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(cursor), i));
 
   const top = (t: string) => ((timeToMin(t) - HOUR_START * 60) / 60) * HOUR_HEIGHT;
@@ -440,6 +466,7 @@ function TimeGrid(props: {
             const iso = toISODate(day);
             const dayBookings = bookings.filter((b) => b.date === iso);
             const dayBlocked = blocked.filter((b) => b.date === iso);
+            const dayGoogle = googleBlocks.filter((g) => g.date === iso);
             const weeklyBlocks = WEEKLY_BLOCKS[day.getDay()] ?? [];
             const amsterdamOnly = isAmsterdamOnlyDay(day);
             return (
@@ -467,6 +494,24 @@ function TimeGrid(props: {
                     onDoubleClick={(e) => e.stopPropagation()}
                   />
                 ))}
+                {dayGoogle.map((g) => {
+                  const startMin = Math.max(timeToMin(g.startTime), HOUR_START * 60);
+                  const endMin = Math.min(timeToMin(g.endTime), HOUR_END * 60);
+                  if (endMin <= startMin) return null;
+                  return (
+                    <div
+                      key={g.key}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      className="absolute left-0.5 right-0.5 rounded bg-sky-100/90 border border-sky-300 px-1 overflow-hidden pointer-events-auto"
+                      style={{ top: top(minToTime(startMin)), height: height(endMin - startMin) }}
+                      title={`Google Calendar · ${g.summary} · ${g.allDay ? "dia inteiro" : `${g.startTime}–${g.endTime}`}`}
+                    >
+                      <span className="text-[10px] text-sky-900 truncate block">
+                        Google · {g.summary}
+                      </span>
+                    </div>
+                  );
+                })}
                 {dayBlocked.map((blk) => (
                   <button
                     key={blk.id}
@@ -599,8 +644,8 @@ function TimeGrid(props: {
   );
 }
 
-function MonthView(props: { cursor: Date; bookings: BookingItem[]; blocked: BlockedSlot[]; onSelectDay: (d: Date) => void }) {
-  const { cursor, bookings, blocked, onSelectDay } = props;
+function MonthView(props: { cursor: Date; bookings: BookingItem[]; blocked: BlockedSlot[]; googleBlocks: GoogleBlock[]; onSelectDay: (d: Date) => void }) {
+  const { cursor, bookings, blocked, googleBlocks, onSelectDay } = props;
   const firstOfMonth = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const gridStart = startOfWeek(firstOfMonth);
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
@@ -621,6 +666,7 @@ function MonthView(props: { cursor: Date; bookings: BookingItem[]; blocked: Bloc
           const inMonth = day.getMonth() === cursor.getMonth();
           const count = bookings.filter((b) => b.date === iso).length;
           const hasBlock = blocked.some((b) => b.date === iso);
+          const hasGoogle = googleBlocks.some((g) => g.date === iso);
           const isToday = iso === todayIso;
           return (
             <button
@@ -643,6 +689,11 @@ function MonthView(props: { cursor: Date; bookings: BookingItem[]; blocked: Bloc
               {hasBlock && (
                 <div className="mt-0.5">
                   <span className="inline-block text-[10px] bg-neutral-300 text-neutral-700 rounded px-1">bloqueio</span>
+                </div>
+              )}
+              {hasGoogle && (
+                <div className="mt-0.5">
+                  <span className="inline-block text-[10px] bg-sky-100 text-sky-900 border border-sky-300 rounded px-1">Google</span>
                 </div>
               )}
             </button>

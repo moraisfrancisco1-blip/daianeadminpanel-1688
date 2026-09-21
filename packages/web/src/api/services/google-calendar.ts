@@ -1,7 +1,7 @@
 import { db } from "../database";
 import { googleCalendarAuth } from "../database/schema";
 import { eq } from "drizzle-orm";
-import { busyBlockToMinutes, shiftDate } from "../lib/busy-intervals";
+import { busyBlockToMinutes, eventToDaySegments, shiftDate, type GoogleEventLike } from "../lib/busy-intervals";
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -226,6 +226,64 @@ export async function getGoogleBusyIntervals(dateISO: string): Promise<{ start: 
     }
   }
   return out;
+}
+
+export type GoogleBlock = {
+  eventId: string;
+  summary: string;
+  date: string; // YYYY-MM-DD
+  startMin: number;
+  endMin: number;
+  allDay: boolean;
+};
+
+/**
+ * Events that make Daiane busy between two dates (inclusive), from the primary
+ * calendar and the booking-sync calendar, split into per-day blocks for the admin
+ * calendar. `connected: false` means Google isn't linked (nothing to show).
+ * Throws if Google can't be read, so the caller can tell the admin.
+ */
+export async function getGoogleEventBlocks(
+  fromISO: string,
+  toISO: string,
+): Promise<{ connected: boolean; blocks: GoogleBlock[] }> {
+  const token = await getValidAccessToken();
+  if (!token) return { connected: false, blocks: [] };
+  const calendarIds = Array.from(new Set(["primary", await getSelectedCalendarId()]));
+
+  const seen = new Set<string>();
+  const blocks: GoogleBlock[] = [];
+  for (const calendarId of calendarIds) {
+    let pageToken: string | undefined;
+    for (let page = 0; page < 4; page++) {
+      const params = new URLSearchParams({
+        timeMin: `${shiftDate(fromISO, -1)}T00:00:00Z`,
+        timeMax: `${shiftDate(toISO, 2)}T00:00:00Z`,
+        singleEvents: "true",
+        orderBy: "startTime",
+        maxResults: "250",
+        timeZone: TZ,
+        fields: "nextPageToken,items(id,summary,status,transparency,start,end)",
+      });
+      if (pageToken) params.set("pageToken", pageToken);
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!res.ok) throw new Error(`Google events.list failed for ${calendarId} (${res.status}): ${await res.text()}`);
+      const data = (await res.json()) as { items?: GoogleEventLike[]; nextPageToken?: string };
+      for (const ev of data.items ?? []) {
+        if (seen.has(ev.id)) continue;
+        seen.add(ev.id);
+        for (const seg of eventToDaySegments(ev, fromISO, toISO)) {
+          blocks.push({ eventId: ev.id, summary: ev.summary?.trim() || "Busy", ...seg });
+        }
+      }
+      pageToken = data.nextPageToken;
+      if (!pageToken) break;
+    }
+  }
+  return { connected: true, blocks };
 }
 
 const DAINE_EMAIL = "daiane.oakes@gmail.com";

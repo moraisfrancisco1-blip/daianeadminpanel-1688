@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "../database";
 import { bookings, services, clients, invoices, invoiceItems, blockedSlots, packages, packageUsages } from "../database/schema";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, and, inArray, gte, lte, isNotNull } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import { stripe } from "../services/stripe";
 import { sendTrackedEmail } from "../services/email-log";
@@ -11,9 +11,10 @@ import { computeTotals, computeDiscountAmount, discountLineInput, type LineInput
 import { invoiceDescriptionForService } from "../lib/invoice-description";
 import { COMPANY } from "../lib/company";
 import { changeInvoiceStatus } from "../services/invoice-activity";
-import { createCalendarEvent, getGoogleBusyIntervals, deleteCalendarEvent, updateCalendarEvent } from "../services/google-calendar";
+import { createCalendarEvent, getGoogleBusyIntervals, getGoogleEventBlocks, deleteCalendarEvent, updateCalendarEvent } from "../services/google-calendar";
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 import { recordAudit, actorFromContext } from "../lib/audit";
+import { shiftDate } from "../lib/busy-intervals";
 
 const BUFFER_MIN = 0; // no artificial gap between sessions — only real overlap is blocked
 const SLOT_GRANULARITY_MIN = 15;
@@ -943,6 +944,45 @@ export const bookingsRoute = new Hono()
       : rows;
     filtered.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
     return c.json({ blocked: filtered }, 200);
+  })
+  // Admin: what's blocking time on Google Calendar (personal events etc.), so the
+  // agenda shows the same times the public booking page hides. Events that are
+  // the app's own synced bookings are left out — those are already drawn as bookings.
+  .get("/google-busy", requireAuth, async (c) => {
+    const from = c.req.query("from") ?? "";
+    const to = c.req.query("to") ?? "";
+    const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+    if (!isDate(from) || !isDate(to) || to < from || shiftDate(from, 62) < to) {
+      return c.json({ message: "from and to (YYYY-MM-DD, at most 62 days apart) are required" }, 400);
+    }
+    try {
+      const { connected, blocks } = await getGoogleEventBlocks(from, to);
+      if (!connected) return c.json({ connected: false, blocks: [] }, 200);
+      const own = await db
+        .select({ googleEventId: bookings.googleEventId })
+        .from(bookings)
+        .where(and(isNotNull(bookings.googleEventId), gte(bookings.date, shiftDate(from, -1)), lte(bookings.date, shiftDate(to, 1))));
+      const ownIds = new Set(own.map((r) => r.googleEventId));
+      return c.json(
+        {
+          connected: true,
+          blocks: blocks
+            .filter((b) => !ownIds.has(b.eventId))
+            .map((b) => ({
+              key: `${b.eventId}:${b.date}`,
+              summary: b.summary,
+              date: b.date,
+              startTime: minutesToTime(b.startMin),
+              endTime: b.endMin >= 1440 ? "24:00" : minutesToTime(b.endMin),
+              allDay: b.allDay,
+            })),
+        },
+        200,
+      );
+    } catch (err) {
+      console.error("[bookings] google-busy failed", err);
+      return c.json({ connected: true, blocks: [], error: "Could not read Google Calendar" }, 200);
+    }
   })
   .post("/blocked", requireAuth, async (c) => {
     const body = await c.req.json();
