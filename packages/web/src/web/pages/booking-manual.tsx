@@ -9,6 +9,8 @@ import { ArrowLeft, Loader2, Calendar, Clock, User, Mail, Phone, FileText, Searc
 type ClientSuggestion = { id: number; name: string; email: string | null; phone: string | null };
 
 const FAR_DATE_WARNING_DAYS = 15;
+// Stable reference so effects that depend on the client list don't re-run on every render.
+const NO_CLIENTS: ClientSuggestion[] = [];
 
 /** How many days a YYYY-MM-DD date is from today (negative = in the past). */
 function daysFromToday(dateStr: string): number {
@@ -84,7 +86,19 @@ function BookingManualContent() {
     queryFn: async () => (await api.clients.$get()).json(),
   });
 
-  const allClients = (clients.data as { clients?: ClientSuggestion[] } | undefined)?.clients ?? [];
+  const allClients = (clients.data as { clients?: ClientSuggestion[] } | undefined)?.clients ?? NO_CLIENTS;
+
+  // Opened from a client's profile ("New session" → ?clientId=ID): pre-select that client once.
+  const preselectId = useRef(new URLSearchParams(window.location.search).get("clientId"));
+  useEffect(() => {
+    const wanted = preselectId.current;
+    if (!wanted || allClients.length === 0) return;
+    const match = allClients.find((c) => c.id === Number(wanted));
+    preselectId.current = null;
+    if (match) {
+      setFormData((prev) => ({ ...prev, clientId: match.id, name: match.name, email: match.email ?? "", phone: match.phone ?? "", packageId: null }));
+    }
+  }, [allClients]);
   const searchQ = normalize(search);
   const searchId = idFromQuery(search);
   const filteredClients = allClients

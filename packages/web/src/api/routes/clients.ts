@@ -2,8 +2,34 @@ import { Hono } from "hono";
 import { db } from "../database";
 import { clients, invoices, bookings, payments, quotes, services, clientNotes, packages, emailLog, messageLog } from "../database/schema";
 import { eq, desc, inArray, or } from "drizzle-orm";
+import { computeDiscountAmount, round2, type DiscountType } from "../lib/totals";
 import { requireAuth } from "../middleware/auth";
 import { createStripeCustomer, updateStripeCustomer, findStripeCustomerByEmail } from "../services/stripe-sync";
+
+function parseTags(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+// Trimmed, de-duplicated (case-insensitive), capped — tags are short labels, not free text.
+function cleanTags(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of input) {
+    const label = typeof t === "string" ? t.trim().slice(0, 30) : "";
+    if (label && !seen.has(label.toLowerCase())) {
+      seen.add(label.toLowerCase());
+      out.push(label);
+    }
+  }
+  return out.slice(0, 12);
+}
 
 export const clientsRoute = new Hono()
   .get("/", requireAuth, async (c) => {
@@ -40,15 +66,24 @@ export const clientsRoute = new Hono()
         phone: bookings.phone,
         serviceId: bookings.serviceId,
         serviceName: services.name,
+        servicePrice: services.price,
+        durationMinutes: services.durationMinutes,
         date: bookings.date,
         startTime: bookings.startTime,
         status: bookings.status,
         depositAmount: bookings.depositAmount,
         depositStatus: bookings.depositStatus,
+        discountType: bookings.discountType,
+        discountValue: bookings.discountValue,
+        notes: bookings.notes,
+        invoiceId: bookings.invoiceId,
+        invoiceStatus: invoices.status,
+        invoiceTotal: invoices.total,
         createdAt: bookings.createdAt,
       })
       .from(bookings)
       .leftJoin(services, eq(bookings.serviceId, services.id))
+      .leftJoin(invoices, eq(bookings.invoiceId, invoices.id))
       .where(client.email ? or(eq(bookings.clientId, id), eq(bookings.email, client.email)) : eq(bookings.clientId, id))
       .orderBy(desc(bookings.date));
 
@@ -98,13 +133,24 @@ export const clientsRoute = new Hono()
     }
     timeline.sort((a, b) => b.date.localeCompare(a.date));
 
+    // What each session costs / whether it's settled, worked out here so the page
+    // doesn't have to guess: the invoice total when there is one (it already
+    // includes any discount), else the service price minus the booking's discount.
+    const sessionRows = clientBookings.map(({ servicePrice, invoiceTotal, invoiceStatus, discountType, discountValue, ...b }) => {
+      const price =
+        invoiceTotal ??
+        round2((servicePrice ?? 0) - computeDiscountAmount(servicePrice ?? 0, discountType as DiscountType | null, discountValue));
+      const paid = invoiceStatus ? invoiceStatus === "paid" : b.depositStatus === "paid";
+      return { ...b, price, paid };
+    });
+
     return c.json(
       {
-        client,
+        client: { ...client, tags: parseTags(client.tags) },
         invoices: clientInvoices,
         quotes: clientQuotes,
         payments: clientPayments,
-        bookings: clientBookings,
+        bookings: sessionRows,
         notes: clientNotesList,
         packages: clientPackages,
         timeline,
@@ -186,6 +232,10 @@ export const clientsRoute = new Hono()
         dateOfBirth: body.dateOfBirth ? new Date(body.dateOfBirth) : null,
         notes: body.notes ?? null,
         clinicalNotes: body.clinicalNotes ?? null,
+        occupation: body.occupation || null,
+        referralSource: body.referralSource || null,
+        preferredLanguage: body.preferredLanguage || null,
+        tags: body.tags !== undefined ? JSON.stringify(cleanTags(body.tags)) : null,
         debtorNumber: body.debtorNumber ?? null,
         stripeCustomerId,
       })
@@ -207,7 +257,9 @@ export const clientsRoute = new Hono()
     }
 
     // Update the linked customer in Stripe (reuses existing — never creates a duplicate here).
-    if (stripeCustomerId) {
+    // Skipped for partial saves that don't touch anything Stripe stores (tags, clinical notes…).
+    const touchesStripeFields = ["name", "email", "phone", "address", "city", "country", "zipCode"].some((k) => k in body);
+    if (stripeCustomerId && touchesStripeFields) {
       await updateStripeCustomer(stripeCustomerId, {
         name: body.name,
         email: body.email ?? null,
@@ -235,6 +287,10 @@ export const clientsRoute = new Hono()
         dateOfBirth: body.dateOfBirth !== undefined ? (body.dateOfBirth ? new Date(body.dateOfBirth) : null) : existingClient.dateOfBirth,
         notes: body.notes !== undefined ? body.notes : existingClient.notes,
         clinicalNotes: body.clinicalNotes !== undefined ? body.clinicalNotes : existingClient.clinicalNotes,
+        occupation: body.occupation !== undefined ? body.occupation || null : existingClient.occupation,
+        referralSource: body.referralSource !== undefined ? body.referralSource || null : existingClient.referralSource,
+        preferredLanguage: body.preferredLanguage !== undefined ? body.preferredLanguage || null : existingClient.preferredLanguage,
+        tags: body.tags !== undefined ? JSON.stringify(cleanTags(body.tags)) : existingClient.tags,
         debtorNumber: body.debtorNumber !== undefined ? body.debtorNumber : existingClient.debtorNumber,
         stripeCustomerId,
       })

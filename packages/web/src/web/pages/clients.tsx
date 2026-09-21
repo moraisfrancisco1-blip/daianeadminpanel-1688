@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
@@ -7,7 +7,7 @@ import { AddressLookupFields, type FoundAddress } from "../components/address-lo
 import { SearchInput, SortableTh, EmptyRow } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { Plus, Mail, Phone, X, Pencil, Trash2, AlertTriangle } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 export default function ClientsPage() {
   return (
@@ -16,6 +16,11 @@ export default function ClientsPage() {
     </Protected>
   );
 }
+
+const LANGUAGE_SUGGESTIONS = ["Português", "English", "Nederlands", "Español"];
+const REFERRAL_SUGGESTIONS = ["Instagram", "Google", "Facebook", "Website", "Friend / referral"];
+// Stable reference so effects that depend on the list don't re-run on every render.
+const NO_CLIENTS: any[] = [];
 
 type ClientSortKey = "id" | "name" | "created";
 const clientComparators: Record<ClientSortKey, (a: any, b: any) => number> = {
@@ -32,6 +37,11 @@ function ClientsContent() {
   const [duplicateWarning, setDuplicateWarning] = useState<any[] | null>(null);
   const [pendingClientData, setPendingClientData] = useState<any | null>(null);
   const qc = useQueryClient();
+  const [, navigate] = useLocation();
+  // Opened from a client's profile ("Edit client" → /clients?edit=ID): open that
+  // client's edit form straight away and go back to the profile when done.
+  const pendingEditId = useRef<string | null>(new URLSearchParams(window.location.search).get("edit"));
+  const returnToProfileId = useRef<string | null>(null);
   const { sortKey, sortDir, toggle } = useSort<ClientSortKey>("name", "asc");
 
   // Address inputs stay uncontrolled (read via FormData on submit), so a
@@ -93,7 +103,8 @@ function ClientsContent() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["clients"] });
-      setEditingClient(null);
+      qc.invalidateQueries({ queryKey: ["client"] });
+      closeEdit();
     },
   });
 
@@ -109,7 +120,25 @@ function ClientsContent() {
     },
   });
 
-  const clientList = clients.data && "clients" in clients.data ? clients.data.clients : [];
+  const clientList = clients.data && "clients" in clients.data ? clients.data.clients : NO_CLIENTS;
+
+  function closeEdit() {
+    setEditingClient(null);
+    const profileId = returnToProfileId.current;
+    returnToProfileId.current = null;
+    if (profileId) navigate(`/clients/${profileId}`);
+  }
+
+  useEffect(() => {
+    const wanted = pendingEditId.current;
+    if (!wanted || clientList.length === 0) return;
+    const match = clientList.find((c: any) => c.id === Number(wanted));
+    pendingEditId.current = null;
+    if (match) {
+      returnToProfileId.current = wanted;
+      setEditingClient(match);
+    }
+  }, [clientList]);
   const q = normalize(search);
   const exactId = idFromQuery(search);
   const filtered = clientList.filter((c: any) => {
@@ -121,6 +150,20 @@ function ClientsContent() {
 
   return (
     <div className="space-y-6">
+      <datalist id="client-language-options" aria-label="Language suggestions">
+        {LANGUAGE_SUGGESTIONS.map((v) => (
+          <option key={v} value={v}>
+            {v}
+          </option>
+        ))}
+      </datalist>
+      <datalist id="client-referral-options" aria-label="Referral suggestions">
+        {REFERRAL_SUGGESTIONS.map((v) => (
+          <option key={v} value={v}>
+            {v}
+          </option>
+        ))}
+      </datalist>
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-display text-3xl font-semibold">Clients</h1>
@@ -225,6 +268,9 @@ function ClientsContent() {
                   country: fd.get("country"),
                   dateOfBirth: fd.get("dateOfBirth") || null,
                   debtorNumber: fd.get("debtorNumber"),
+                  occupation: fd.get("occupation"),
+                  referralSource: fd.get("referralSource"),
+                  preferredLanguage: fd.get("preferredLanguage"),
                 };
                 const dupes = findPossibleDuplicates(data as any);
                 if (dupes.length > 0) {
@@ -256,6 +302,11 @@ function ClientsContent() {
                   <input name="debtorNumber" placeholder="Debtor #" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1" />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input name="occupation" aria-label="Occupation" placeholder="Occupation" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+                <input name="preferredLanguage" aria-label="Preferred language" list="client-language-options" placeholder="Language" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              </div>
+              <input name="referralSource" aria-label="How they found the studio" list="client-referral-options" placeholder="How did they find the studio?" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <Button type="submit" className="w-full" disabled={createClient.isPending}>
                 {createClient.isPending ? "Saving…" : "Save client"}
               </Button>
@@ -327,7 +378,7 @@ function ClientsContent() {
       {editingClient && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-card rounded-xl p-6 w-full max-w-md space-y-4 relative">
-            <button onClick={() => setEditingClient(null)} className="absolute top-4 right-4 text-muted-foreground">
+            <button onClick={closeEdit} aria-label="Close" className="absolute top-4 right-4 text-muted-foreground">
               <X className="size-4" />
             </button>
             <h2 className="font-display text-xl font-semibold">Edit client</h2>
@@ -348,6 +399,9 @@ function ClientsContent() {
                     notes: fd.get("notes"),
                     dateOfBirth: fd.get("dateOfBirth") || null,
                     debtorNumber: fd.get("debtorNumber"),
+                    occupation: fd.get("occupation"),
+                    referralSource: fd.get("referralSource"),
+                    preferredLanguage: fd.get("preferredLanguage"),
                   },
                 });
               }}
@@ -378,6 +432,11 @@ function ClientsContent() {
                   <input name="debtorNumber" placeholder="Debtor #" defaultValue={editingClient.debtorNumber ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1" />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input name="occupation" aria-label="Occupation" placeholder="Occupation" defaultValue={editingClient.occupation ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+                <input name="preferredLanguage" aria-label="Preferred language" list="client-language-options" placeholder="Language" defaultValue={editingClient.preferredLanguage ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              </div>
+              <input name="referralSource" aria-label="How they found the studio" list="client-referral-options" placeholder="How did they find the studio?" defaultValue={editingClient.referralSource ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <textarea name="notes" placeholder="Notes" defaultValue={editingClient.notes ?? ""} rows={3} className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm resize-none" />
               <Button type="submit" className="w-full" disabled={updateClient.isPending}>
                 {updateClient.isPending ? "Saving…" : "Save changes"}

@@ -20,6 +20,10 @@ export const clients = sqliteTable("clients", {
   // Health/session-related notes (e.g. areas of tension, contraindications) —
   // kept separate from the general `notes` field above.
   clinicalNotes: text("clinical_notes"),
+  occupation: text("occupation"),
+  referralSource: text("referral_source"), // how they found the studio (Instagram, Google, a friend…)
+  preferredLanguage: text("preferred_language"),
+  tags: text("tags"), // JSON array of short labels, e.g. ["Post-partum","Diastasis"]
   debtorNumber: text("debtor_number"),
   stripeCustomerId: text("stripe_customer_id").unique(),
   createdAt: integer("created_at", { mode: "timestamp" })
