@@ -5,6 +5,7 @@ import { stripe } from "../services/stripe";
 import { db } from "../database";
 import { invoices, bookings, services, clients, invoiceItems } from "../database/schema";
 import { COMPANY } from "../lib/company";
+import { getOrCreateCheckoutUrl, PAY_TOKEN_RE } from "../lib/invoice-checkout";
 
 /**
  * PUBLIC payment endpoints (no auth).
@@ -117,4 +118,41 @@ paymentsRoute.get("/checkout-session/:sessionId", async (c) => {
     },
     200,
   );
+});
+
+function messagePage(title: string, body: string) {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} — Studio Daï Oakes</title>
+<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#F2ECE4;color:#2b4a45;text-align:center;padding:24px}
+div{max-width:420px}h1{font-size:1.25rem}p{color:#4b5b58}</style></head>
+<body><div><h1>${title}</h1><p>${body}</p></div></body></html>`;
+}
+
+/**
+ * PUBLIC durable payment link: what's actually emailed/copied to a client, instead of a raw
+ * Stripe Checkout URL. Stripe caps a one-time Checkout Session at 24h, so a link that pointed
+ * straight at Stripe would be dead by the time an out-of-town client got round to paying it —
+ * this one is on our own domain and forever forwards to a live session, however old it is.
+ */
+paymentsRoute.get("/pay/:token", async (c) => {
+  const token = c.req.param("token");
+  if (!PAY_TOKEN_RE.test(token)) return c.html(messagePage("Invalid link", "This payment link is not valid. Please contact us for a new one."), 400);
+
+  const [invoice] = await db.select().from(invoices).where(eq(invoices.payToken, token));
+  if (!invoice) return c.html(messagePage("Link not found", "This payment link is no longer valid. Please contact us for a new one."), 404);
+
+  if (invoice.status === "cancelled") {
+    return c.html(messagePage("Invoice cancelled", `Invoice ${invoice.invoiceNumber} has been cancelled. Please contact us if you believe this is a mistake.`), 410);
+  }
+  if (invoice.status === "paid") {
+    return c.html(messagePage("Already paid", `Invoice ${invoice.invoiceNumber} has already been paid — thank you! Please contact us if you think this isn't right.`), 200);
+  }
+
+  const [client] = await db.select().from(clients).where(eq(clients.id, invoice.clientId));
+  if (!client) return c.html(messagePage("Something went wrong", "We couldn't find your details. Please contact us directly."), 404);
+
+  const origin = process.env.WEBSITE_URL ?? "";
+  const checkoutUrl = await getOrCreateCheckoutUrl(invoice, client, origin);
+  if (!checkoutUrl) return c.html(messagePage("Payment unavailable", "We couldn't set up your payment right now. Please contact us directly."), 500);
+
+  return c.redirect(checkoutUrl, 302);
 });

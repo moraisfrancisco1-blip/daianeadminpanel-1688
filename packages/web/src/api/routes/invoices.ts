@@ -11,79 +11,8 @@ import { sendTrackedEmail } from "../services/email-log";
 import { changeInvoiceStatus, recordInvoiceActivity } from "../services/invoice-activity";
 import { COMPANY, getCompanyInvoiceDetails } from "../lib/company";
 import { stripe } from "../services/stripe";
-import { findStripeCustomerByEmail, createStripeCustomer, voidStripeInvoice, deleteStripeInvoice } from "../services/stripe-sync";
-
-async function ensureStripeCustomerId(client: any): Promise<string | null> {
-  if (client.stripeCustomerId) return client.stripeCustomerId;
-  if (!stripe) return null;
-  let customerId = client.email ? await findStripeCustomerByEmail(client.email) : null;
-  if (!customerId) {
-    customerId = await createStripeCustomer({
-      name: client.name,
-      email: client.email ?? null,
-      phone: client.phone ?? null,
-      address: client.address ?? null,
-      city: client.city ?? null,
-      country: client.country ?? null,
-      zipCode: client.zipCode ?? null,
-    });
-  }
-  if (customerId) {
-    await db.update(clients).set({ stripeCustomerId: customerId }).where(eq(clients.id, client.id));
-  }
-  return customerId;
-}
-
-async function getOrCreateCheckoutUrl(invoice: any, client: any, origin: string): Promise<string | null> {
-  if (!stripe) return null;
-  if (invoice.status === "paid" || invoice.status === "cancelled") return null;
-
-  // Reuse an existing open/complete session.
-  if (invoice.stripeCheckoutSessionId) {
-    try {
-      const existing = await stripe.checkout.sessions.retrieve(invoice.stripeCheckoutSessionId);
-      if (existing.url && (existing.status === "open" || existing.status === "complete")) {
-        return existing.url;
-      }
-    } catch {
-      // fall through and create a new session
-    }
-  }
-
-  const customerId = await ensureStripeCustomerId(client);
-  if (!customerId) return null;
-
-  const metadata: Record<string, string> = {
-    adminInvoiceId: String(invoice.id),
-    invoiceNumber: invoice.invoiceNumber,
-    clientId: String(client.id),
-  };
-  if (invoice.bookingId) metadata.bookingId = String(invoice.bookingId);
-
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    line_items: [
-      {
-        price_data: {
-          currency: "eur",
-          product_data: { name: `Invoice ${invoice.invoiceNumber}` },
-          unit_amount: Math.round(invoice.total * 100),
-        },
-        quantity: 1,
-      },
-    ],
-    success_url: `${origin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/payment-cancelled`,
-    customer: customerId,
-    metadata,
-    // Propagate metadata to the PaymentIntent so payment_intent.succeeded can also
-    // identify the Admin invoice (Checkout Session metadata is NOT copied automatically).
-    payment_intent_data: { metadata },
-  });
-
-  await db.update(invoices).set({ stripeCheckoutSessionId: session.id }).where(eq(invoices.id, invoice.id));
-  return session.url ?? null;
-}
+import { voidStripeInvoice, deleteStripeInvoice } from "../services/stripe-sync";
+import { getOrCreateCheckoutUrl, ensurePayToken, payUrl } from "../lib/invoice-checkout";
 
 export const invoicesRoute = new Hono()
   .get("/", requireAuth, async (c) => {
@@ -385,11 +314,16 @@ export const invoicesRoute = new Hono()
     if (!client) return c.json({ message: "Client not found" }, 404);
     if (!client.email) return c.json({ message: "Client has no email" }, 400);
 
-    // Idempotent: reuses an existing open/complete Checkout Session, only creating a new
-    // one when the previous link expired/failed. Never creates a duplicate invoice.
+    // Priming a live Checkout Session now is not required for the durable link to work — it
+    // creates one lazily on first click — but doing it here surfaces a Stripe misconfiguration
+    // immediately instead of only when the client actually clicks.
     const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
-    const checkoutUrl = await getOrCreateCheckoutUrl(invoice, client, origin);
-    if (!checkoutUrl) return c.json({ message: "Stripe not configured or could not create payment link" }, 500);
+    const primed = await getOrCreateCheckoutUrl(invoice, client, origin);
+    if (!primed) return c.json({ message: "Stripe not configured or could not create payment link" }, 500);
+
+    // Our own domain, never Stripe's directly: Stripe caps a Checkout Session at 24h, so a
+    // one-time link emailed today would be dead by the time an out-of-town client pays next week.
+    const durableUrl = payUrl(await ensurePayToken(invoice));
 
     // "Send Payment Link" = email only the payment link (no invoice PDF attachment).
     await sendTrackedEmail({
@@ -404,12 +338,12 @@ export const invoicesRoute = new Hono()
         clientName: client.name,
         invoiceNumber: invoice.invoiceNumber,
         total: invoice.total,
-        paymentUrl: checkoutUrl,
+        paymentUrl: durableUrl,
       }),
     });
 
     await changeInvoiceStatus(id, "sent", { channel: "admin", type: "payment_link_sent" });
-    return c.json({ success: true, checkoutUrl }, 200);
+    return c.json({ success: true, checkoutUrl: durableUrl }, 200);
   })
   .post("/:id/checkout", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
@@ -422,18 +356,21 @@ export const invoicesRoute = new Hono()
     if (!client) return c.json({ message: "Client not found" }, 404);
 
     const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
-    const checkoutUrl = await getOrCreateCheckoutUrl(invoice, client, origin);
-    if (!checkoutUrl) return c.json({ message: "Stripe not configured or could not create checkout" }, 500);
+    const primed = await getOrCreateCheckoutUrl(invoice, client, origin);
+    if (!primed) return c.json({ message: "Stripe not configured or could not create checkout" }, 500);
+
+    // Our own domain, never Stripe's directly — see /send-payment-link for why.
+    const durableUrl = payUrl(await ensurePayToken(invoice));
 
     await recordInvoiceActivity({
       invoiceId: id,
       type: "payment_link_created",
       channel: "admin",
       amount: invoice.total,
-      metadata: { checkoutUrl },
+      metadata: { checkoutUrl: durableUrl },
     });
 
-    return c.json({ checkoutUrl }, 200);
+    return c.json({ checkoutUrl: durableUrl }, 200);
   })
   .put("/:id/edit", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));

@@ -112,6 +112,10 @@ export const invoices = sqliteTable("invoices", {
   stripeInvoiceId: text("stripe_invoice_id").unique(),
   stripePaymentIntentId: text("stripe_payment_intent_id").unique(),
   stripeCheckoutSessionId: text("stripe_checkout_session_id").unique(),
+  // Stable id for this invoice's durable payment link (/api/payments/pay/:payToken) — created lazily
+  // the first time a payment link is generated, then reused forever so an old emailed link keeps working
+  // even after its underlying Stripe Checkout Session (capped at 24h by Stripe) has expired.
+  payToken: text("pay_token").unique(),
   // Snapshot of the real Stripe state, kept fresh by webhooks and the Payment Control "Verify" action.
   stripeCheckoutStatus: text("stripe_checkout_status"), // open | complete | expired | processing
   stripePaymentIntentStatus: text("stripe_payment_intent_status"), // succeeded | processing | requires_payment_method | canceled | requires_action
