@@ -28,8 +28,7 @@ export type DaySchedule = {
   blocks: { startMin: number; endMin: number }[];
 };
 
-// Centralized per-day availability (Mon/Wed/Fri = Rotterdam studio, Tue/Thu = Amsterdam's
-// regular days — Rotterdam can book them too now; Coffee & Talk only runs on these two).
+// Centralized per-day availability (Mon/Wed/Fri = Rotterdam studio, Tue/Thu = Amsterdam-only).
 // Exported for reuse in reports.ts's utilization-rate calculation.
 export const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
   1: { // Monday — block 09:00–10:00
@@ -37,7 +36,7 @@ export const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
     endMin: 18 * 60,
     blocks: [{ startMin: 9 * 60, endMin: 10 * 60 }],
   },
-  2: { // Tuesday (Amsterdam's day; also Rotterdam and Coffee & Talk)
+  2: { // Tuesday (Amsterdam only)
     startMin: 9 * 60,
     endMin: 18 * 60,
     blocks: [],
@@ -47,7 +46,7 @@ export const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
     endMin: 18 * 60,
     blocks: [{ startMin: 9 * 60, endMin: 11 * 60 }],
   },
-  4: { // Thursday (Amsterdam's day; also Rotterdam and Coffee & Talk)
+  4: { // Thursday (Amsterdam only)
     startMin: 9 * 60,
     endMin: 18 * 60,
     blocks: [],
@@ -59,26 +58,23 @@ export const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
   },
 };
 
-// Tuesday/Thursday are Amsterdam's regular days (used below to record which
-// location an admin-created booking falls under); Rotterdam no longer needs
-// its bookings to avoid them — see scheduleFor.
+// Tuesday/Thursday are reserved exclusively for Amsterdam-location sessions;
+// every other working day is Rotterdam-only.
 function locationForDay(day: number): "amsterdam" | "rotterdam" {
   return day === 2 || day === 4 ? "amsterdam" : "rotterdam";
 }
 
 /**
  * Returns the day's schedule, or null if it has no availability for the given
- * location/service. Tue/Thu are Amsterdam's own days but no longer exclusive —
- * Rotterdam can book them too. Coffee & Talk is the one exception: it's only
- * offered on Tuesdays and Thursdays, for either location.
+ * location/service. Coffee & Talk is the one exception to the strict location
+ * split: it's only offered on Tuesdays and Thursdays, for either location.
  */
 function scheduleFor(dateStr: string, location?: string, coffeeTalk = false): DaySchedule | null {
   const day = new Date(dateStr + "T00:00:00").getDay();
   const schedule = WEEKLY_SCHEDULE[day] ?? null;
   if (!schedule) return null;
-  const isAmsterdamDay = locationForDay(day) === "amsterdam";
-  if (coffeeTalk) return isAmsterdamDay ? schedule : null;
-  if (location === "amsterdam" && !isAmsterdamDay) return null;
+  if (coffeeTalk) return locationForDay(day) === "amsterdam" ? schedule : null;
+  if (location && locationForDay(day) !== location) return null;
   return schedule;
 }
 
@@ -196,8 +192,7 @@ export const bookingsRoute = new Hono()
     const [service] = c.req.query("serviceId")
       ? await db.select().from(services).where(eq(services.id, Number(c.req.query("serviceId"))))
       : [null];
-    // Coffee & Talk is only offered on Tue/Thu (either location); other services
-    // follow the location split, and Tue/Thu no longer block Rotterdam.
+    // Coffee & Talk is only offered on Tue/Thu (either location); other services keep the strict location split.
     const schedule = scheduleFor(date, location, isCoffeeTalkService(service));
     if (!schedule) return c.json({ slots: [] }, 200);
     const duration = service?.durationMinutes ?? 60;

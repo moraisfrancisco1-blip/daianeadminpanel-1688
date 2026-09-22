@@ -96,9 +96,9 @@ function minToTime(min: number): string {
   const m = min % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
-// Tuesdays and Thursdays are Amsterdam's regular days (and the only days Coffee
-// & Talk runs) — Rotterdam can book them too now, so this is no longer exclusive.
-function isAmsterdamDay(day: Date): boolean {
+// Tuesdays and Thursdays are reserved for Amsterdam-location sessions only
+// (Coffee & Talk being the one service that can also use them from Rotterdam).
+function isAmsterdamOnlyDay(day: Date): boolean {
   const dow = day.getDay();
   return dow === 2 || dow === 4;
 }
@@ -502,18 +502,18 @@ function TimeGrid(props: {
           {days.map((day) => {
             const iso = toISODate(day);
             const isToday = iso === toISODate(new Date());
-            const amsterdamDay = isAmsterdamDay(day);
+            const amsterdamOnly = isAmsterdamOnlyDay(day);
             return (
               <div
                 key={iso}
                 className={`flex-1 min-w-[90px] border-l border-b px-2 py-2 text-center ${
-                  isToday ? "bg-brand-cream" : amsterdamDay ? "bg-pink-100" : ""
+                  isToday ? "bg-brand-cream" : amsterdamOnly ? "bg-pink-100" : ""
                 }`}
-                title={amsterdamDay ? "Dia de Amsterdão — Rotterdam e Coffee & Talk também disponíveis" : undefined}
+                title={amsterdamOnly ? "Só para clientes de Amsterdão (exceto Coffee & Talk)" : undefined}
               >
                 <p className="text-xs font-medium">{day.toLocaleDateString("en-GB", { weekday: "short" })}</p>
                 <p className={`text-lg font-display ${isToday ? "text-brand-copper" : ""}`}>{day.getDate()}</p>
-                {amsterdamDay && <p className="text-[9px] text-pink-700 font-medium">Amsterdão</p>}
+                {amsterdamOnly && <p className="text-[9px] text-pink-700 font-medium">Amsterdão</p>}
               </div>
             );
           })}
@@ -532,12 +532,12 @@ function TimeGrid(props: {
             const dayBlocked = blocked.filter((b) => b.date === iso);
             const dayGoogle = googleBlocks.filter((g) => g.date === iso);
             const weeklyBlocks = WEEKLY_BLOCKS[day.getDay()] ?? [];
-            const amsterdamDay = isAmsterdamDay(day);
+            const amsterdamOnly = isAmsterdamOnlyDay(day);
             return (
               <div
                 key={iso}
                 data-day-col={iso}
-                className={`flex-1 min-w-[90px] border-l relative ${amsterdamDay ? "bg-pink-50" : ""}`}
+                className={`flex-1 min-w-[90px] border-l relative ${amsterdamOnly ? "bg-pink-50" : ""}`}
                 style={{ height: HOURS.length * HOUR_HEIGHT }}
                 onDoubleClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();

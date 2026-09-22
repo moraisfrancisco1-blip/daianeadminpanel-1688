@@ -40,9 +40,8 @@ function BookingField(props: { id: string; label: string; error?: string; childr
 const inputClass = (invalid: boolean) =>
   `w-full h-10 px-3 rounded-md border bg-background text-sm ${invalid ? "border-destructive" : "border-input"}`;
 
-// Tue/Thu are Amsterdam's regular days, but no longer exclusive to it — Rotterdam is open every weekday now.
 const LOCATION_DAYS: Record<"rotterdam" | "amsterdam", number[]> = {
-  rotterdam: [1, 2, 3, 4, 5],
+  rotterdam: [1, 3, 5],
   amsterdam: [2, 4],
 };
 
@@ -216,7 +215,7 @@ export default function BookPage() {
                       location === "rotterdam" ? "bg-brand-teal text-white border-brand-teal" : "border-input bg-background"
                     }`}
                   >
-                    {coffeeTalk ? "Rotterdam (Tue/Thu)" : "Rotterdam (Mon–Fri)"}
+                    {coffeeTalk ? "Rotterdam (Tue/Thu)" : "Rotterdam (Mon/Wed/Fri)"}
                   </button>
                   <button
                     type="button"
@@ -233,7 +232,7 @@ export default function BookPage() {
               <div>
                 <label className="text-sm font-medium mb-1.5 block flex items-center gap-1.5 text-brand-teal">
                   <CalendarDays className="size-4" />
-                  {coffeeTalk || location === "amsterdam" ? "Date (Tue / Thu)" : "Date (Mon – Fri)"}
+                  {coffeeTalk || location === "amsterdam" ? "Date (Tue / Thu)" : "Date (Mon / Wed / Fri, 10:00–18:00)"}
                 </label>
                 <select
                   className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
