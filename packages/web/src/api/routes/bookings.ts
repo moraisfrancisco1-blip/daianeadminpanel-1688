@@ -15,7 +15,7 @@ import { createCalendarEvent, getGoogleEventBlocks, deleteCalendarEvent, updateC
 import { sendAdminWhatsApp, buildBookingWhatsAppMessage } from "../services/whatsapp";
 import { recordAudit, actorFromContext } from "../lib/audit";
 import { shiftDate } from "../lib/busy-intervals";
-import { schedulingLocation } from "../lib/coffee-talk";
+import { isCoffeeTalkService } from "../lib/coffee-talk";
 import { validateBookingDetails, calendarEventDescription, formatAddress } from "../lib/booking-details";
 import { findOrCreateClientForBooking } from "../lib/booking-client";
 
@@ -28,7 +28,8 @@ export type DaySchedule = {
   blocks: { startMin: number; endMin: number }[];
 };
 
-// Centralized per-day availability (Mon/Wed/Fri = Rotterdam studio, Tue/Thu = Amsterdam-only).
+// Centralized per-day availability (Mon/Wed/Fri = Rotterdam studio, Tue/Thu = Amsterdam's
+// regular days — Rotterdam can book them too now; Coffee & Talk only runs on these two).
 // Exported for reuse in reports.ts's utilization-rate calculation.
 export const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
   1: { // Monday — block 09:00–10:00
@@ -36,7 +37,7 @@ export const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
     endMin: 18 * 60,
     blocks: [{ startMin: 9 * 60, endMin: 10 * 60 }],
   },
-  2: { // Tuesday (Amsterdam only)
+  2: { // Tuesday (Amsterdam's day; also Rotterdam and Coffee & Talk)
     startMin: 9 * 60,
     endMin: 18 * 60,
     blocks: [],
@@ -46,7 +47,7 @@ export const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
     endMin: 18 * 60,
     blocks: [{ startMin: 9 * 60, endMin: 11 * 60 }],
   },
-  4: { // Thursday (Amsterdam only)
+  4: { // Thursday (Amsterdam's day; also Rotterdam and Coffee & Talk)
     startMin: 9 * 60,
     endMin: 18 * 60,
     blocks: [],
@@ -58,18 +59,26 @@ export const WEEKLY_SCHEDULE: Record<number, DaySchedule> = {
   },
 };
 
-// Tuesday/Thursday are reserved exclusively for Amsterdam-location sessions;
-// every other working day is Rotterdam-only.
+// Tuesday/Thursday are Amsterdam's regular days (used below to record which
+// location an admin-created booking falls under); Rotterdam no longer needs
+// its bookings to avoid them — see scheduleFor.
 function locationForDay(day: number): "amsterdam" | "rotterdam" {
   return day === 2 || day === 4 ? "amsterdam" : "rotterdam";
 }
 
-/** Returns the day's schedule, or null if it has no availability for the given location. */
-function scheduleFor(dateStr: string, location?: string): DaySchedule | null {
+/**
+ * Returns the day's schedule, or null if it has no availability for the given
+ * location/service. Tue/Thu are Amsterdam's own days but no longer exclusive —
+ * Rotterdam can book them too. Coffee & Talk is the one exception: it's only
+ * offered on Tuesdays and Thursdays, for either location.
+ */
+function scheduleFor(dateStr: string, location?: string, coffeeTalk = false): DaySchedule | null {
   const day = new Date(dateStr + "T00:00:00").getDay();
   const schedule = WEEKLY_SCHEDULE[day] ?? null;
   if (!schedule) return null;
-  if (location && locationForDay(day) !== location) return null;
+  const isAmsterdamDay = locationForDay(day) === "amsterdam";
+  if (coffeeTalk) return isAmsterdamDay ? schedule : null;
+  if (location === "amsterdam" && !isAmsterdamDay) return null;
   return schedule;
 }
 
@@ -99,8 +108,8 @@ async function localBusyIntervals(date: string, schedule: DaySchedule, excludeBo
   return out;
 }
 
-async function isSlotAvailable(date: string, startTime: string, durationMinutes: number, excludeBookingId?: number, location?: string): Promise<boolean> {
-  const schedule = scheduleFor(date, location);
+async function isSlotAvailable(date: string, startTime: string, durationMinutes: number, excludeBookingId?: number, location?: string, coffeeTalk = false): Promise<boolean> {
+  const schedule = scheduleFor(date, location, coffeeTalk);
   if (!schedule) return false;
   const start = timeToMinutes(startTime);
   const end = start + durationMinutes;
@@ -187,8 +196,9 @@ export const bookingsRoute = new Hono()
     const [service] = c.req.query("serviceId")
       ? await db.select().from(services).where(eq(services.id, Number(c.req.query("serviceId"))))
       : [null];
-    // Coffee & Talk can also be booked on Tue/Thu with Rotterdam; other services keep the location split.
-    const schedule = scheduleFor(date, schedulingLocation(location, service));
+    // Coffee & Talk is only offered on Tue/Thu (either location); other services
+    // follow the location split, and Tue/Thu no longer block Rotterdam.
+    const schedule = scheduleFor(date, location, isCoffeeTalkService(service));
     if (!schedule) return c.json({ slots: [] }, 200);
     const duration = service?.durationMinutes ?? 60;
 
@@ -231,7 +241,7 @@ export const bookingsRoute = new Hono()
     }
     const location = body.location === "amsterdam" ? "amsterdam" : "rotterdam";
     if (
-      !(await isSlotAvailable(body.date, body.startTime, service.durationMinutes, undefined, schedulingLocation(location, service))) ||
+      !(await isSlotAvailable(body.date, body.startTime, service.durationMinutes, undefined, location, isCoffeeTalkService(service))) ||
       (await overlapsGoogleBusy(body.date, body.startTime, service.durationMinutes))
     ) {
       return c.json({ message: "The selected time is not available" }, 409);
