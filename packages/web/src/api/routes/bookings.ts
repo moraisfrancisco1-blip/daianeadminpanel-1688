@@ -18,6 +18,7 @@ import { shiftDate } from "../lib/busy-intervals";
 import { isCoffeeTalkService } from "../lib/coffee-talk";
 import { validateBookingDetails, calendarEventDescription, formatAddress } from "../lib/booking-details";
 import { findOrCreateClientForBooking } from "../lib/booking-client";
+import { syncClientFromBooking, type Contact } from "../lib/client-sync";
 
 const BUFFER_MIN = 0; // no artificial gap between sessions — only real overlap is blocked
 const SLOT_GRANULARITY_MIN = 15;
@@ -772,6 +773,23 @@ export const bookingsRoute = new Hono()
       });
     } else if (status === "confirmed") {
       await syncBookingToGoogleCalendar(booking!, service.name, service.durationMinutes);
+    }
+
+    // Booking → client: correcting a name/phone/email directly on a booking should also fix
+    // it on the client record (and, from there, cascade to that client's other bookings) —
+    // the same rule the client-edit page already applies, entered from this side. Never lets
+    // a sync hiccup fail the booking save itself.
+    if (existing.clientId) {
+      try {
+        const contactBefore: Contact = {
+          name: existing.name, email: existing.email, phone: existing.phone,
+          address: existing.address, zipCode: existing.zipCode, city: existing.city, country: existing.country,
+        };
+        const contactAfter: Contact = { ...contactBefore, name: booking!.name, email: booking!.email, phone: booking!.phone };
+        await syncClientFromBooking(contactBefore, contactAfter, existing.clientId);
+      } catch (err) {
+        console.error("[bookings] could not sync client from booking edit", id, err);
+      }
     }
 
     return c.json({ booking }, 200);

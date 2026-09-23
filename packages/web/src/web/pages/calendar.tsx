@@ -219,6 +219,9 @@ function CalendarContent() {
       qc.invalidateQueries({ queryKey: ["bookings"] });
       qc.invalidateQueries({ queryKey: ["calendar-bookings"] });
       qc.invalidateQueries({ queryKey: ["dashboard-today"] });
+      // A name/email/phone edit here can cascade back to the linked client record.
+      qc.invalidateQueries({ queryKey: ["clients"] });
+      qc.invalidateQueries({ queryKey: ["client"] });
       setSelectedBooking(null);
       notify("Reserva atualizada.");
     },

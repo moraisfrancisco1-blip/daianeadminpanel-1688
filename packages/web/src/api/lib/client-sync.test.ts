@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { planBookingPatches, type BookingContactRow, type Contact } from "./client-sync";
+import { planBookingPatches, planClientPatch, type BookingContactRow, type Contact } from "./client-sync";
 
 const contact = (o: Partial<Contact> = {}): Contact => ({
   name: "Naiara", email: "naiara@gmail.com", phone: null, address: null, zipCode: null, city: null, country: null, ...o,
@@ -54,5 +54,40 @@ describe("planBookingPatches", () => {
   test("clearing an optional field on the client clears it on mirroring bookings", () => {
     const plan = planBookingPatches(contact({ phone: "0611111111" }), contact({ phone: "" }), [row(1, { phone: "0611111111" })]);
     expect(plan).toEqual([{ id: 1, patch: { phone: null } }]);
+  });
+});
+
+describe("planClientPatch (the reverse direction: booking edit → client record)", () => {
+  test("the reported case: fixing the name/phone on a booking follows onto the client that mirrored it", () => {
+    const before = contact();
+    const after = contact({ name: "Naiara Araujo Magalhães", phone: "+31 685270261" });
+    expect(planClientPatch(before, after, contact())).toEqual({ name: "Naiara Araujo Magalhães", phone: "+31 685270261" });
+  });
+
+  test("a client detail already corrected elsewhere is never clobbered by a stale booking edit", () => {
+    const before = contact({ phone: "0600000000" });
+    const after = contact({ phone: "0699999999" });
+    // The client's phone no longer matches what this booking was made with — leave it.
+    expect(planClientPatch(before, after, contact({ phone: "0611111111" }))).toEqual({});
+  });
+
+  test("a booking made under someone else's name never cascades onto the client", () => {
+    const before = contact({ name: "Beatriz (daughter)" });
+    const after = contact({ name: "Beatriz (daughter)", phone: "0611111111" });
+    expect(planClientPatch(before, after, contact())).toEqual({});
+  });
+
+  test("nothing changed => nothing to do", () => {
+    expect(planClientPatch(contact(), contact(), contact())).toEqual({});
+  });
+
+  test("email changes follow too, and the client's name/email are never blanked", () => {
+    expect(planClientPatch(contact(), contact({ email: "new@gmail.com" }), contact())).toEqual({ email: "new@gmail.com" });
+    expect(planClientPatch(contact(), contact({ name: "" }), contact())).toEqual({});
+  });
+
+  test("a blank client field takes a value the booking just received", () => {
+    const plan = planClientPatch(contact({ address: null }), contact({ address: "Koraal 143" }), contact({ address: null }));
+    expect(plan).toEqual({ address: "Koraal 143" });
   });
 });

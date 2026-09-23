@@ -1,5 +1,5 @@
 import { db } from "../database";
-import { bookings, services } from "../database/schema";
+import { bookings, services, clients } from "../database/schema";
 import { eq, or } from "drizzle-orm";
 import { updateCalendarEvent } from "../services/google-calendar";
 import { calendarEventDescription } from "./booking-details";
@@ -89,6 +89,55 @@ export async function syncBookingsToClient(before: Contact & { id: number }, aft
   }
 
   return { bookingsUpdated: plan.length, googleUpdated };
+}
+
+/**
+ * The reverse of planBookingPatches: what a client's own record should follow when one of
+ * their bookings is corrected directly (e.g. fixing a typo'd phone number in the booking
+ * edit modal). Only fields where the client currently MIRRORS the booking's old value (or
+ * both were blank) are touched — a client detail that's already been corrected elsewhere is
+ * never clobbered by an edit made on just one of their bookings — and the client's own
+ * name/email can never be blanked.
+ */
+export function planClientPatch(before: Contact, after: Contact, client: Contact): BookingPatchFields {
+  // Mirrors planBookingPatches's own-name guard: a booking made under someone else's name
+  // (e.g. "Beatriz (daughter)" on the same account) isn't this client's identity, so an
+  // edit to it must never cascade onto the client record.
+  if (norm(client.name) !== norm(before.name)) return {};
+  const changed = FIELDS.filter((f) => norm(before[f]) !== norm(after[f]));
+  const patch: BookingPatchFields = {};
+  for (const f of changed) {
+    if (norm(client[f]) !== norm(before[f])) continue; // client already holds something else: leave it
+    const next = after[f]?.trim() || null;
+    if (f === "name" || f === "email") {
+      if (next) patch[f] = next; // a client's name/email can never be blanked
+    } else {
+      patch[f] = next;
+    }
+  }
+  return patch;
+}
+
+/**
+ * Applies a booking-edit contact change to the client it belongs to, then cascades that
+ * (via syncBookingsToClient) to any other bookings of the same client — the same rule the
+ * client-edit page already follows, just entered from the other end.
+ */
+export async function syncClientFromBooking(before: Contact, after: Contact, clientId: number) {
+  const [client] = await db.select().from(clients).where(eq(clients.id, clientId));
+  if (!client) return { clientUpdated: false, bookingsUpdated: 0, googleUpdated: 0 };
+
+  const clientBefore: Contact = {
+    name: client.name, email: client.email, phone: client.phone,
+    address: client.address, zipCode: client.zipCode, city: client.city, country: client.country,
+  };
+  const patch = planClientPatch(before, after, clientBefore);
+  if (Object.keys(patch).length === 0) return { clientUpdated: false, bookingsUpdated: 0, googleUpdated: 0 };
+
+  await db.update(clients).set(patch).where(eq(clients.id, clientId));
+  const clientAfter: Contact = { ...clientBefore, ...patch };
+  const cascade = await syncBookingsToClient({ ...clientBefore, id: clientId }, { ...clientAfter, id: clientId });
+  return { clientUpdated: true, ...cascade };
 }
 
 export const CONTACT_FIELDS = FIELDS;
