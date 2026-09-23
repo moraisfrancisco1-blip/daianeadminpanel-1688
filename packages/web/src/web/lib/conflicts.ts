@@ -5,6 +5,8 @@ export type ConflictBooking = {
   date: string; // YYYY-MM-DD
   startTime: string; // HH:MM
   status: string;
+  // Admin-only group class (2/4/6 people sharing a slot on purpose) — never a real conflict.
+  isGroupBooking?: boolean;
 };
 
 export type ConflictGoogleBlock = {
@@ -65,6 +67,7 @@ export function findConflicts(
   };
 
   for (const a of active) {
+    if (a.b.isGroupBooking) continue; // deliberately shares its slot (e.g. with the class's own Google event)
     for (const g of googleBlocks) {
       if (g.date !== a.b.date) continue;
       if (a.start < toMin(g.endTime) && a.end > toMin(g.startTime)) {
@@ -80,6 +83,7 @@ export function findConflicts(
       const x = active[i]!;
       const y = active[j]!;
       if (y.b.date !== x.b.date) break;
+      if (x.b.isGroupBooking || y.b.isGroupBooking) continue; // an intentional group-class overlap, not a conflict
       if (x.start < y.end && x.end > y.start) {
         report.bookingIds.add(x.b.id);
         report.bookingIds.add(y.b.id);

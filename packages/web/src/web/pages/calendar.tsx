@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { Time24Input } from "../components/time-24-input";
 import { findConflicts } from "../lib/conflicts";
+import { layoutOverlaps } from "../lib/day-layout";
 import { api } from "../lib/api";
 import { Link, useLocation } from "wouter";
 import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse, Percent } from "lucide-react";
@@ -35,6 +36,7 @@ type BookingItem = {
   payFullNow: boolean;
   invoiceId: number | null;
   notes: string | null;
+  isGroupBooking: boolean;
 };
 
 type GoogleBlock = { key: string; summary: string; calendar?: string; date: string; startTime: string; endTime: string; allDay: boolean };
@@ -536,6 +538,14 @@ function TimeGrid(props: {
             const dayGoogle = googleBlocks.filter((g) => g.date === iso);
             const weeklyBlocks = WEEKLY_BLOCKS[day.getDay()] ?? [];
             const amsterdamOnly = isAmsterdamOnlyDay(day);
+            // Side-by-side columns for bookings that overlap in time (a group class sharing its
+            // slot on purpose) instead of stacking their boxes on top of each other.
+            const dayLayout = layoutOverlaps(
+              dayBookings.map((b) => {
+                const start = timeToMin(b.startTime);
+                return { id: b.id, start, end: start + (durationMap.get(b.serviceId ?? -1) ?? 60) };
+              }),
+            );
             return (
               <div
                 key={iso}
@@ -606,6 +616,7 @@ function TimeGrid(props: {
                   const isHolding = !!mine && mine.touch && !mine.armed; // finger down, waiting for the hold to complete
                   const isLifted = !!mine && mine.touch && mine.armed && !mine.moved; // hold done: ready to drag
                   const inConflict = conflictBookingIds.has(b.id);
+                  const { col, cols } = dayLayout.get(b.id) ?? { col: 0, cols: 1 };
                   return (
                     <button
                       key={b.id}
@@ -700,7 +711,7 @@ function TimeGrid(props: {
                         // Long-press on a phone opens the browser menu / text selection: not while holding to drag.
                         if (mine?.touch) e.preventDefault();
                       }}
-                      className={`absolute left-0.5 right-0.5 rounded border overflow-hidden shadow-sm text-left ${
+                      className={`absolute rounded border overflow-hidden shadow-sm text-left ${
                         isLocked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"
                       } ${isDragging ? "opacity-30" : ""} ${inConflict ? "ring-2 ring-red-500 z-[5]" : ""} ${
                         isLifted ? "ring-2 ring-brand-copper shadow-xl scale-[1.03] z-10" : ""
@@ -708,6 +719,10 @@ function TimeGrid(props: {
                       style={{
                         top: top(b.startTime),
                         height: height(dur),
+                        // A group class splits its slot into side-by-side columns instead of stacking
+                        // (cols === 1 reduces to the same 2px inset every booking box always had).
+                        left: `calc(${(col / cols) * 100}% + 2px)`,
+                        width: `calc(${100 / cols}% - 4px)`,
                         // "manipulation" keeps normal scrolling/swiping on touch (the old "none" made the page
                         // impossible to scroll from a booking); mouse is unaffected.
                         touchAction: isLocked ? "auto" : "manipulation",
@@ -715,7 +730,13 @@ function TimeGrid(props: {
                         WebkitUserSelect: "none",
                         userSelect: "none",
                       }}
-                      title={inConflict ? "Conflito: há outra coisa nesta hora" : undefined}
+                      title={
+                        inConflict
+                          ? "Conflito: há outra coisa nesta hora"
+                          : b.isGroupBooking
+                            ? "Aula de grupo"
+                            : undefined
+                      }
                     >
                       <div className={`absolute inset-0 ${style} ${isCancelled ? "opacity-40" : ""}`} />
                       {isHolding && (

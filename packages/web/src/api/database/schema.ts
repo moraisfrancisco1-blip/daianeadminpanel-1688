@@ -190,6 +190,10 @@ export const bookings = sqliteTable("bookings", {
   startTime: text("start_time").notNull(), // HH:MM
   location: text("location").notNull().default("rotterdam"), // rotterdam (Mon/Wed/Fri studio) | amsterdam (Tue/Thu only)
   status: text("status").notNull().default("pending_deposit"), // pending_deposit, confirmed, cancelled, completed, no_show
+  // Admin-only: lets this booking share its exact time slot with others (a group class —
+  // 2, 4, 6 people). Set only from the manual-booking form; online bookings never set it,
+  // and it also exempts the booking from the agenda's double-booking conflict warning.
+  isGroupBooking: integer("is_group_booking", { mode: "boolean" }).notNull().default(false),
   depositAmount: real("deposit_amount").notNull().default(25),
   depositStatus: text("deposit_status").notNull().default("unpaid"), // unpaid, paid, refunded
   discountType: text("discount_type"), // percent | fixed | null (no discount)

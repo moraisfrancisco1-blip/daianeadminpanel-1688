@@ -58,6 +58,31 @@ describe("findConflicts", () => {
     expect(run([booking({ id: 1, date: "2026-09-28" })], [google({ key: "a", date: "2026-09-29" })]).items).toHaveLength(0);
   });
 
+  test("group-class bookings never conflict with each other, even stacked on the exact same slot", () => {
+    const r = run(
+      [
+        booking({ id: 1, startTime: "09:00", name: "Bea", isGroupBooking: true }),
+        booking({ id: 2, startTime: "09:00", name: "Cris", isGroupBooking: true }),
+        booking({ id: 3, startTime: "09:00", name: "Ana", isGroupBooking: true }),
+      ],
+      [],
+    );
+    expect(r.items).toHaveLength(0);
+  });
+
+  test("a group-class booking is also exempt from a Google-event overlap (it's likely the class itself)", () => {
+    const r = run([booking({ id: 1, startTime: "10:00", isGroupBooking: true })], [google({ key: "a", startTime: "10:00", endTime: "11:00" })]);
+    expect(r.items).toHaveLength(0);
+  });
+
+  test("a group-class booking overlapping a NON-group booking is still exempted (one flag is enough)", () => {
+    const r = run(
+      [booking({ id: 1, startTime: "09:00", name: "Bea", isGroupBooking: true }), booking({ id: 2, startTime: "09:00", name: "Cris" })],
+      [],
+    );
+    expect(r.items).toHaveLength(0);
+  });
+
   test("results are ordered by date then time", () => {
     const r = run(
       [booking({ id: 1, date: "2026-10-02", startTime: "14:00" }), booking({ id: 2, date: "2026-09-28", startTime: "16:00" })],

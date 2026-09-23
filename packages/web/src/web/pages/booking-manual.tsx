@@ -56,6 +56,7 @@ function BookingManualContent() {
     travelKm: "",
     travelTimeMinutes: "",
     travelVatRate: "0.09",
+    isGroupBooking: false,
   });
   const [showTravel, setShowTravel] = useState(false);
   const [showDiscount, setShowDiscount] = useState(false);
@@ -143,6 +144,7 @@ function BookingManualContent() {
           travelKm: data.travelKm ? Number(data.travelKm) : undefined,
           travelTimeMinutes: data.travelTimeMinutes ? Number(data.travelTimeMinutes) : undefined,
           travelVatRate: data.travelPrice ? Number(data.travelVatRate) : undefined,
+          isGroupBooking: data.isGroupBooking,
         },
       });
       const json = await response.json();
@@ -175,6 +177,7 @@ function BookingManualContent() {
         travelKm: "",
         travelTimeMinutes: "",
         travelVatRate: "0.09",
+        isGroupBooking: false,
       });
       setShowTravel(false);
       setShowDiscount(false);
@@ -238,12 +241,17 @@ function BookingManualContent() {
   };
 
   // Fetch available slots for the selected date/service (respects weekly schedule + bookings).
+  // "Aula de grupo" also asks for an already-booked slot, to add another person to it.
   const availability = useQuery({
-    queryKey: ["availability", formData.date, formData.serviceId],
+    queryKey: ["availability", formData.date, formData.serviceId, formData.isGroupBooking],
     queryFn: async () => {
       if (!formData.date || !formData.serviceId) return { slots: [] as string[] };
       const res = await api.bookings.availability.$get({
-        query: { date: formData.date, serviceId: formData.serviceId },
+        query: {
+          date: formData.date,
+          serviceId: formData.serviceId,
+          ...(formData.isGroupBooking ? { isGroupBooking: "true" } : {}),
+        },
       });
       return (await res.json()) as { slots: string[] };
     },
@@ -448,6 +456,24 @@ function BookingManualContent() {
                 </div>
               </div>
             </div>
+
+            <label className="flex items-start gap-2.5 text-sm">
+              <input
+                type="checkbox"
+                aria-label="Aula de grupo"
+                checked={formData.isGroupBooking}
+                onChange={(e) => setFormData({ ...formData, isGroupBooking: e.target.checked, startTime: "" })}
+                className="mt-0.5 size-4"
+              />
+              <span>
+                Aula de grupo
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  Permite marcar este horário mesmo já havendo outra reserva ao mesmo tempo — para juntar 2, 4, 6...
+                  pessoas na mesma aula. Só disponível aqui (marcação manual); no site público continua um cliente
+                  por horário.
+                </span>
+              </span>
+            </label>
           </div>
         </div>
 

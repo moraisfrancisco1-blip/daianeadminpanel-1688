@@ -86,13 +86,19 @@ type Interval = { start: number; end: number };
  * schedule's fixed blocks, one-off blocks the admin made ("Bloquear horário"),
  * and active bookings. The public slot list and the booking-time check both
  * read from here so they can never disagree about what is free.
+ *
+ * `skipBookingOverlap` leaves out the "another booking already occupies this
+ * time" check — used only for an admin's intentional group-class booking,
+ * which deliberately shares its slot with others. Blocked slots and the fixed
+ * weekly-schedule blocks still apply either way.
  */
-async function localBusyIntervals(date: string, schedule: DaySchedule, excludeBookingId?: number): Promise<Interval[]> {
-  const [blocked, active, allServices] = await Promise.all([
+async function localBusyIntervals(date: string, schedule: DaySchedule, excludeBookingId?: number, skipBookingOverlap = false): Promise<Interval[]> {
+  const [blocked, activeRows, allServices] = await Promise.all([
     db.select().from(blockedSlots).where(eq(blockedSlots.date, date)),
     db.select().from(bookings).where(and(eq(bookings.date, date), inArray(bookings.status, ["confirmed", "pending_deposit"]))),
     db.select().from(services),
   ]);
+  const active = skipBookingOverlap ? [] : activeRows;
   const serviceDuration = new Map(allServices.map((s) => [s.id, s.durationMinutes]));
 
   const out: Interval[] = schedule.blocks.map((b) => ({ start: b.startMin, end: b.endMin }));
@@ -105,14 +111,14 @@ async function localBusyIntervals(date: string, schedule: DaySchedule, excludeBo
   return out;
 }
 
-async function isSlotAvailable(date: string, startTime: string, durationMinutes: number, excludeBookingId?: number, location?: string, coffeeTalk = false): Promise<boolean> {
+async function isSlotAvailable(date: string, startTime: string, durationMinutes: number, excludeBookingId?: number, location?: string, coffeeTalk = false, isGroupBooking = false): Promise<boolean> {
   const schedule = scheduleFor(date, location, coffeeTalk);
   if (!schedule) return false;
   const start = timeToMinutes(startTime);
   const end = start + durationMinutes;
   if (start < schedule.startMin || end > schedule.endMin) return false;
 
-  const busy = await localBusyIntervals(date, schedule, excludeBookingId);
+  const busy = await localBusyIntervals(date, schedule, excludeBookingId, isGroupBooking);
   return !busy.some((b) => start < b.end && end > b.start);
 }
 
@@ -198,8 +204,13 @@ export const bookingsRoute = new Hono()
     if (!schedule) return c.json({ slots: [] }, 200);
     const duration = service?.durationMinutes ?? 60;
 
+    // Manual booking's own time picker asks to also see an already-booked slot when
+    // it's about to add another person to a group class — read-only (just what's
+    // listed here), the actual admin-only bypass is enforced again at creation time.
+    const isGroupBooking = c.req.query("isGroupBooking") === "true";
+
     // Weekly-schedule blocks, admin "Bloquear horário" blocks and active bookings.
-    const busyIntervals = await localBusyIntervals(date, schedule);
+    const busyIntervals = await localBusyIntervals(date, schedule, undefined, isGroupBooking);
 
     // Also block out any events already on Daiane's Google Calendar for this date,
     // so the public site never offers a slot she's already busy with elsewhere.
@@ -445,6 +456,7 @@ export const bookingsRoute = new Hono()
         discountType: bookings.discountType,
         discountValue: bookings.discountValue,
         payFullNow: bookings.payFullNow,
+        isGroupBooking: bookings.isGroupBooking,
         // From the joined invoice, not the booking's own column: a booking can still point at an
         // invoice that was deleted, and that must read as "no invoice" (not "has one, can't find it").
         invoiceId: invoices.id,
@@ -467,7 +479,10 @@ export const bookingsRoute = new Hono()
     if (!body.date || !body.startTime) {
       return c.json({ message: "Date and time are required" }, 400);
     }
-    if (!(await isSlotAvailable(body.date, body.startTime, service.durationMinutes))) {
+    // "Aula de grupo" (admin-only, never sent by the public booking form): deliberately
+    // shares its slot with other bookings — a group class of 2, 4, 6 people.
+    const isGroupBooking = !!body.isGroupBooking;
+    if (!(await isSlotAvailable(body.date, body.startTime, service.durationMinutes, undefined, undefined, false, isGroupBooking))) {
       return c.json({ message: "The selected time is not available" }, 409);
     }
 
@@ -528,6 +543,7 @@ export const bookingsRoute = new Hono()
         payFullNow: true,
         paymentMethod: usedPackage ? "package" : (body.paymentMethod ?? null),
         notes: usedPackage ? [body.notes, `Paid via package: ${usedPackage.name} (#${usedPackage.id})`].filter(Boolean).join(" — ") : (body.notes ?? null),
+        isGroupBooking,
       })
       .returning();
 
@@ -720,8 +736,9 @@ export const bookingsRoute = new Hono()
     const date = body.date ?? existing.date;
     const startTime = body.startTime ?? existing.startTime;
     const status = body.status ?? existing.status;
+    const isGroupBooking = body.isGroupBooking ?? existing.isGroupBooking;
 
-    if (!(await isSlotAvailable(date, startTime, service.durationMinutes, id))) {
+    if (!(await isSlotAvailable(date, startTime, service.durationMinutes, id, undefined, false, isGroupBooking))) {
       return c.json({ message: "The selected time is not available" }, 409);
     }
 
@@ -747,6 +764,7 @@ export const bookingsRoute = new Hono()
         status,
         discountType,
         discountValue,
+        isGroupBooking,
       })
       .where(eq(bookings.id, id))
       .returning();
