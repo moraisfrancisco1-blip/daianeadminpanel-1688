@@ -6,7 +6,8 @@ import { db } from "../database";
 import { clients, invoices, bookings, services, invoiceItems, payments, refunds, emailLog } from "../database/schema";
 import { eq, and } from "drizzle-orm";
 import { nextNumber } from "../lib/counters";
-import { computeVat, DEFAULT_VAT_RATE } from "../lib/totals";
+import { computeVat, computeTotals, DEFAULT_VAT_RATE, type LineInput } from "../lib/totals";
+import { amsterdamSurcharge } from "../lib/amsterdam-surcharge";
 import { invoiceDescriptionForService } from "../lib/invoice-description";
 import { buildBookingConfirmationHtml, buildAdminNewBookingHtml, buildPaymentConfirmationHtml } from "../lib/email-templates";
 import { findOrCreateClientForBooking } from "../lib/booking-client";
@@ -560,11 +561,27 @@ stripeWebhookRoute.post("/", async (c) => {
         const client = await findOrCreateClientForBooking(booking);
         await db.update(bookings).set({ clientId: client!.id }).where(eq(bookings.id, bookingId));
 
-        // Create the Admin invoice (source of truth) for the booking deposit.
+        // Create the Admin invoice (source of truth) for the booking deposit. The total
+        // always equals booking.depositAmount — what Stripe actually charged — split back
+        // into its own service line plus, for Amsterdam, a separate travel-surcharge line
+        // (never re-derived from the service's live price, which could have changed since).
         const [service] = await db.select().from(services).where(eq(services.id, booking.serviceId));
         const vatRate = service?.vatRate ?? DEFAULT_VAT_RATE;
         const amount = booking.depositAmount;
-        const { net, vat } = computeVat(amount, vatRate);
+        const surcharge = amsterdamSurcharge(booking.location, service?.price ?? 0);
+        const lineInputs: LineInput[] = [
+          {
+            description: service ? invoiceDescriptionForService(service) : "Session",
+            serviceId: service?.id,
+            quantity: 1,
+            unitPrice: Number((amount - surcharge).toFixed(2)),
+            vatRate,
+          },
+        ];
+        if (surcharge > 0) {
+          lineInputs.push({ description: "Amsterdam travel surcharge", quantity: 1, unitPrice: surcharge, vatRate });
+        }
+        const { lineItems, subtotal, vatTotal, total } = computeTotals(lineInputs);
         const invoiceNumber = await nextNumber("invoice", new Date().getFullYear());
         const issueDate = new Date();
         const dueDate = new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
@@ -577,22 +594,25 @@ stripeWebhookRoute.post("/", async (c) => {
           issueDate,
           dueDate,
           notes: booking.payFullNow ? "Paid in full at booking." : "Booking deposit — remainder due at session.",
-          subtotal: net,
-          vatTotal: vat,
-          total: amount,
+          subtotal,
+          vatTotal,
+          total,
           paidAt: new Date(),
           stripePaymentIntentId: paymentIntentId,
           stripeCheckoutSessionId: session.id,
         }).returning();
 
-        await db.insert(invoiceItems).values({
-          invoiceId: invoice!.id,
-          description: service ? invoiceDescriptionForService(service) : "Session",
-          quantity: 1,
-          unitPrice: net,
-          vatRate,
-          amount: net,
-        });
+        for (const item of lineItems) {
+          await db.insert(invoiceItems).values({
+            invoiceId: invoice!.id,
+            serviceId: item.serviceId ?? null,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            vatRate: item.vatRate,
+            amount: item.amount,
+          });
+        }
 
         // Link the invoice to the booking (also powers idempotency on retries).
         await db.update(bookings).set({ invoiceId: invoice!.id }).where(eq(bookings.id, bookingId));
@@ -626,7 +646,9 @@ stripeWebhookRoute.post("/", async (c) => {
             depositStatus: "paid",
             paymentMethod: booking.paymentMethod,
             payFullNow: booking.payFullNow,
-            servicePrice: service?.price ?? 0,
+            // What was actually charged (includes the Amsterdam surcharge, if any) — not the
+            // catalog's raw service price, which the client never sees at checkout.
+            servicePrice: booking.depositAmount,
           }),
         });
 

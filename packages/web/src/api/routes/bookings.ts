@@ -19,6 +19,7 @@ import { isCoffeeTalkService } from "../lib/coffee-talk";
 import { validateBookingDetails, calendarEventDescription, formatAddress } from "../lib/booking-details";
 import { findOrCreateClientForBooking } from "../lib/booking-client";
 import { syncClientFromBooking, type Contact } from "../lib/client-sync";
+import { amsterdamSurcharge } from "../lib/amsterdam-surcharge";
 
 const BUFFER_MIN = 0; // no artificial gap between sessions — only real overlap is blocked
 const SLOT_GRANULARITY_MIN = 15;
@@ -256,7 +257,8 @@ export const bookingsRoute = new Hono()
 
     // Deposit-only bookings are disabled for now — every public booking pays in full.
     const payFullNow = true;
-    const amountToCharge = service.price;
+    // Amsterdam sessions carry a flat travel surcharge on top of the service's own price.
+    const amountToCharge = service.price + amsterdamSurcharge(location, service.price);
 
     // Free services (e.g. "Coffee & Talk") need no payment — confirm immediately.
     if (service.price === 0) {
@@ -380,7 +382,7 @@ export const bookingsRoute = new Hono()
           depositStatus: "unpaid",
           paymentMethod: body.paymentMethod ?? null,
           payFullNow,
-          servicePrice: service.price,
+          servicePrice: amountToCharge,
         }),
       });
 
@@ -848,6 +850,10 @@ export const bookingsRoute = new Hono()
     const lineInputs: LineInput[] = [
       { description: invoiceDescriptionForService(service), serviceId: service.id, quantity: 1, unitPrice: service.price, vatRate },
     ];
+    const surcharge = amsterdamSurcharge(booking.location, service.price);
+    if (surcharge > 0) {
+      lineInputs.push({ description: "Amsterdam travel surcharge", quantity: 1, unitPrice: surcharge, vatRate });
+    }
     const discountLine = discountLineInput(service.price, vatRate, discountType, discountValue);
     if (discountLine) lineInputs.push(discountLine);
 

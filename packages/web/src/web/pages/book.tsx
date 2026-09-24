@@ -92,6 +92,9 @@ export default function BookPage() {
   const isFree = selectedService?.price === 0;
   const coffeeTalk = isCoffeeTalkService(selectedService);
   const dates = nextWorkDays(9, location, coffeeTalk);
+  // Amsterdam sessions carry a flat €25 travel surcharge (free services, like Coffee & Talk, never do).
+  const amsterdamSurcharge = !isFree && location === "amsterdam" ? 25 : 0;
+  const totalPrice = (selectedService?.price ?? 0) + amsterdamSurcharge;
 
   // Re-pick a date when the location (or a service with different days) changes so it's never stale.
   useEffect(() => {
@@ -224,7 +227,7 @@ export default function BookPage() {
                       location === "amsterdam" ? "bg-brand-teal text-white border-brand-teal" : "border-input bg-background"
                     }`}
                   >
-                    Amsterdam (Tue/Thu)
+                    Amsterdam (Tue/Thu){!isFree && " +€25 travel"}
                   </button>
                 </div>
               </div>
@@ -323,8 +326,13 @@ export default function BookPage() {
               {!isFree && (
                 <div className="bg-brand-beige/60 rounded-lg p-4 space-y-1">
                   <p className="text-sm font-medium text-brand-teal">
-                    Pay in full to confirm {selectedService && `(€${selectedService.price.toFixed(2)})`}
+                    Pay in full to confirm {selectedService && `(€${totalPrice.toFixed(2)})`}
                   </p>
+                  {amsterdamSurcharge > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      €{selectedService!.price.toFixed(2)} + €{amsterdamSurcharge.toFixed(2)} Amsterdam travel
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     You'll choose your payment method (card, iDEAL, and more) securely on the next screen.
                   </p>
