@@ -9,7 +9,7 @@ import { LineItemEditor, LineItemDraft } from "../components/line-item-editor";
 import { SearchInput, SortableTh, EmptyRow, StatusFilter } from "../components/data-table";
 import { useSort, cmpStr, cmpNum, cmpDate, cmpNumberLike, matchesId, applyDir, normalize, idFromQuery } from "../lib/list";
 import { netToGross } from "../../api/lib/totals";
-import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil, Link2, Copy, ExternalLink, History, Ban } from "lucide-react";
+import { Plus, X, Download, Send, CheckCircle2, Loader2, Trash2, Pencil, Link2, Copy, ExternalLink, History, Ban, RotateCcw } from "lucide-react";
 import { downloadFile } from "../lib/download";
 
 export default function InvoicesPage() {
@@ -242,6 +242,20 @@ function InvoicesContent() {
     onError: (err: any) => showToast("error", err?.message ?? "Failed to mark invoice as paid."),
   });
 
+  const reopenInvoice = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/invoices/${id}/reopen`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to reopen invoice.");
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      showToast("success", "Invoice reopened — you can now send a fresh payment link.");
+    },
+    onError: (err: any) => showToast("error", err?.message ?? "Failed to reopen invoice."),
+  });
+
   const sendInvoice = useMutation({
     mutationFn: async (id: number) => {
       const res = await api.invoices[":id"].send.$post({ param: { id: String(id) } });
@@ -306,6 +320,16 @@ function InvoicesContent() {
     },
     onError: (err: any) => showToast("error", err?.message ?? "Failed to cancel invoice."),
   });
+
+  function handleReopen(id: number, invoiceNumber: string) {
+    if (
+      window.confirm(
+        `Reopen invoice ${invoiceNumber}? Use this only if it was marked paid by mistake (e.g. no real payment was received) — it removes that manual payment record and lets you send a fresh payment link.`,
+      )
+    ) {
+      reopenInvoice.mutate(id);
+    }
+  }
 
   function handleCancel(id: number, invoiceNumber: string) {
     if (window.confirm(`Cancel invoice ${invoiceNumber}? It keeps its number for the record but no longer counts as revenue.`)) {
@@ -511,6 +535,16 @@ function InvoicesContent() {
                           label="Mark paid"
                           tone="success"
                           title="Mark as paid manually (e.g. cash, bank transfer)"
+                        />
+                      )}
+                      {inv.status === "paid" && !inv.stripePaymentIntentId && (
+                        <ActionButton
+                          onClick={() => handleReopen(inv.id, inv.invoiceNumber)}
+                          disabled={reopenInvoice.isPending && reopenInvoice.variables === inv.id}
+                          icon={reopenInvoice.isPending && reopenInvoice.variables === inv.id ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
+                          label="Reopen"
+                          tone="purple"
+                          title="Undo a mistaken 'Mark paid' — removes that manual payment and lets you send a fresh payment link"
                         />
                       )}
                       <ActionButton
