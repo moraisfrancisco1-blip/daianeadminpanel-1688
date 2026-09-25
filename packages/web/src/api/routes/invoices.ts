@@ -176,6 +176,34 @@ export const invoicesRoute = new Hono()
 
     return c.json({ invoice }, 200);
   })
+  // Undo a mistaken "Mark paid" click: reverts to "sent" and removes the manual payment
+  // record it created, so a fresh payment link can be sent and nothing double-counts once
+  // the client actually pays. Refuses if a real Stripe payment is on file — that path is
+  // never allowed to be silently reopened this way.
+  .post("/:id/reopen", requireAuth, async (c) => {
+    const id = Number(c.req.param("id"));
+    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+    if (!invoice) return c.json({ message: "Not found" }, 404);
+    if (invoice.status !== "paid") return c.json({ message: "Invoice is not marked as paid" }, 400);
+
+    const invoicePayments = await db.select().from(payments).where(eq(payments.invoiceId, id));
+    if (invoicePayments.some((p) => p.stripePaymentIntentId)) {
+      return c.json({ message: "This invoice has a real Stripe payment on file — it can't be reopened this way." }, 400);
+    }
+
+    for (const p of invoicePayments) {
+      await db.delete(payments).where(eq(payments.id, p.id));
+    }
+
+    await changeInvoiceStatus(id, "sent", {
+      channel: "admin",
+      type: "status_changed",
+      metadata: { reason: "reopened_after_mistaken_manual_payment" },
+    });
+
+    const [updated] = await db.select().from(invoices).where(eq(invoices.id, id));
+    return c.json({ invoice: updated }, 200);
+  })
   .post("/:id/payments", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
     const body = await c.req.json();
