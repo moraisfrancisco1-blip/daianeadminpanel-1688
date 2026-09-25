@@ -6,7 +6,7 @@ import { findConflicts } from "../lib/conflicts";
 import { layoutOverlaps } from "../lib/day-layout";
 import { api } from "../lib/api";
 import { Link, useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse, Percent } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse, Percent, RotateCcw } from "lucide-react";
 
 const FAR_DATE_WARNING_DAYS = 15;
 
@@ -866,6 +866,7 @@ function BookingDetailModal(props: {
   onDelete: () => void;
 }) {
   const { booking, services, saving, onClose, onSave, onDelete } = props;
+  const qc = useQueryClient();
   const [name, setName] = useState(booking.name);
   const [email, setEmail] = useState(booking.email);
   const [phone, setPhone] = useState(booking.phone ?? "");
@@ -881,6 +882,7 @@ function BookingDetailModal(props: {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [sendInvoiceLoading, setSendInvoiceLoading] = useState(false);
   const [sendInvoiceMsg, setSendInvoiceMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [reopenLoading, setReopenLoading] = useState(false);
   const [generatedInvoice, setGeneratedInvoice] = useState<{ id: number; invoiceNumber: string; status: string; total: number } | null>(
     null,
   );
@@ -924,6 +926,31 @@ function BookingDetailModal(props: {
       setSendInvoiceMsg({ ok: false, text: e?.message ?? "Failed to send invoice." });
     } finally {
       setSendInvoiceLoading(false);
+    }
+  }
+
+  async function reopenInvoice() {
+    if (!effectiveInvoiceId) return;
+    if (
+      !window.confirm(
+        "Reopen this invoice? Use this only if it was marked paid by mistake (e.g. no real payment was received) — it removes that manual payment record and lets you send a fresh payment link.",
+      )
+    ) {
+      return;
+    }
+    setReopenLoading(true);
+    setSendInvoiceMsg(null);
+    try {
+      const res = await fetch(`/api/invoices/${effectiveInvoiceId}/reopen`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { message?: string })?.message ?? "Failed to reopen invoice");
+      setSendInvoiceMsg({ ok: true, text: "Invoice reopened — you can now send a fresh payment link." });
+      qc.invalidateQueries({ queryKey: ["invoice", booking.invoiceId] });
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+    } catch (e: any) {
+      setSendInvoiceMsg({ ok: false, text: e?.message ?? "Failed to reopen invoice." });
+    } finally {
+      setReopenLoading(false);
     }
   }
 
@@ -1189,6 +1216,20 @@ function BookingDetailModal(props: {
               className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent"
             >
               <Link2 className="size-4" /> Send Payment Link · Invoice {effectiveInvoice.invoiceNumber}
+            </button>
+          </div>
+        )}
+
+        {effectiveInvoice && effectiveInvoice.status === "paid" && (
+          <div className="border-t pt-3">
+            <button
+              type="button"
+              onClick={reopenInvoice}
+              disabled={reopenLoading}
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-input hover:bg-accent disabled:opacity-50"
+            >
+              {reopenLoading ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
+              Reopen invoice (fix a mistaken "Mark paid")
             </button>
           </div>
         )}
