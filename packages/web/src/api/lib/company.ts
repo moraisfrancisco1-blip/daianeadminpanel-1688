@@ -64,7 +64,7 @@ export const PRACTICE_ADDRESS = {
 // confirmation email (clients don't scroll to the bottom to find where to go).
 export const LOCATION_ADDRESS = {
   rotterdam: { name: "Studio Daï Oakes", full: PRACTICE_ADDRESS.full },
-  amsterdam: { name: "Aquarela Hair Salon", full: "Ina van Faassenhof 60, Amsterdam" },
+  amsterdam: { name: "Aquarela Hair Salon", full: "Ina van Faassenhof 60, 1031 JM Amsterdam" },
 } as const;
 
 // WhatsApp click-to-chat number (E.164 without '+'), used for the "Book via WhatsApp" button.
