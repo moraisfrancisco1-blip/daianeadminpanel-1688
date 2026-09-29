@@ -59,5 +59,13 @@ export const PRACTICE_ADDRESS = {
   full: "Ommoordsweg 32, 3056 JP Rotterdam",
 };
 
+// Where a session actually happens, per location — Tue/Thu Amsterdam sessions run out of a
+// rented room at a hair salon, not the Rotterdam studio. Shown near the top of the booking
+// confirmation email (clients don't scroll to the bottom to find where to go).
+export const LOCATION_ADDRESS = {
+  rotterdam: { name: "Studio Daï Oakes", full: PRACTICE_ADDRESS.full },
+  amsterdam: { name: "Aquarela Hair Salon", full: "Ina van Faassenhof 60, Amsterdam" },
+} as const;
+
 // WhatsApp click-to-chat number (E.164 without '+'), used for the "Book via WhatsApp" button.
 export const WHATSAPP_CONTACT_NUMBER = "31611660722";

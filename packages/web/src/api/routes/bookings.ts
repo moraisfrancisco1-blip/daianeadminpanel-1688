@@ -300,6 +300,7 @@ export const bookingsRoute = new Hono()
           paymentMethod: null,
           payFullNow: true,
           servicePrice: service.price,
+          location: booking!.location,
         }),
       });
 
@@ -383,6 +384,7 @@ export const bookingsRoute = new Hono()
           paymentMethod: body.paymentMethod ?? null,
           payFullNow,
           servicePrice: amountToCharge,
+          location: booking!.location,
         }),
       });
 
@@ -656,6 +658,7 @@ export const bookingsRoute = new Hono()
         payFullNow: isFullPayment,
         servicePrice: service.price,
         checkoutUrl: null,
+        location: booking!.location,
       }),
     });
 

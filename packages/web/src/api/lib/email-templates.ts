@@ -1,4 +1,4 @@
-import { PRACTICE_ADDRESS } from "./company";
+import { PRACTICE_ADDRESS, LOCATION_ADDRESS } from "./company";
 
 const TEAL = "#2E5252";
 const COPPER = "#AE633F";
@@ -57,10 +57,12 @@ export function buildBookingConfirmationHtml(opts: {
   payFullNow: boolean;
   servicePrice: number;
   checkoutUrl?: string | null;
+  location?: string | null;
 }) {
   const formattedDate = formatBookingDate(opts.date);
   const isFree = opts.servicePrice === 0;
   const isAlmostConfirmed = opts.depositStatus === "unpaid" && opts.checkoutUrl;
+  const venue = opts.location === "amsterdam" ? LOCATION_ADDRESS.amsterdam : LOCATION_ADDRESS.rotterdam;
 
   const title = isAlmostConfirmed
     ? "✨ Your Appointment is Almost Confirmed"
@@ -87,9 +89,15 @@ export function buildBookingConfirmationHtml(opts: {
   }
 
   return wrapper(`
-    <div style="text-align:center;margin-bottom:28px;">
+    <div style="text-align:center;margin-bottom:20px;">
       <p style="font-size:20px;color:${TEAL};margin:0 0 8px;">${title}</p>
       <p style="color:#6B6259;margin:0;">${subtitle}</p>
+    </div>
+
+    <div style="background:${TEAL};border-radius:8px;padding:16px 20px;margin-bottom:24px;text-align:center;">
+      <p style="font-size:12px;font-weight:600;color:${GOLD};margin:0 0 4px;letter-spacing:1px;text-transform:uppercase;">📍 Location</p>
+      <p style="margin:0;color:#ffffff;font-weight:600;font-size:15px;">${venue.name}</p>
+      <p style="margin:2px 0 0;color:#ffffff;font-size:13px;">${venue.full}</p>
     </div>
 
     <div style="background:${CREAM};border-radius:8px;padding:20px 24px;margin-bottom:24px;">

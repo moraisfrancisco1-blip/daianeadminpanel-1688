@@ -649,6 +649,7 @@ stripeWebhookRoute.post("/", async (c) => {
             // What was actually charged (includes the Amsterdam surcharge, if any) — not the
             // catalog's raw service price, which the client never sees at checkout.
             servicePrice: booking.depositAmount,
+            location: booking.location,
           }),
         });
 
