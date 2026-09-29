@@ -36,6 +36,7 @@ function ClientsContent() {
   const [deletingClient, setDeletingClient] = useState<any>(null);
   const [duplicateWarning, setDuplicateWarning] = useState<any[] | null>(null);
   const [pendingClientData, setPendingClientData] = useState<any | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const qc = useQueryClient();
   const [, navigate] = useLocation();
   // Opened from a client's profile ("Edit client" → /clients?edit=ID): open that
@@ -50,19 +51,23 @@ function ClientsContent() {
   const addAddressRef = useRef<HTMLInputElement>(null);
   const addCityRef = useRef<HTMLInputElement>(null);
   const addZipRef = useRef<HTMLInputElement>(null);
+  const addCountryRef = useRef<HTMLInputElement>(null);
   function fillAddAddress(found: FoundAddress) {
     if (addAddressRef.current) addAddressRef.current.value = `${found.street} ${found.houseNumber}`.trim();
     if (addCityRef.current) addCityRef.current.value = found.city;
     if (addZipRef.current) addZipRef.current.value = found.postcode;
+    if (addCountryRef.current) addCountryRef.current.value = "Netherlands";
   }
 
   const editAddressRef = useRef<HTMLInputElement>(null);
   const editCityRef = useRef<HTMLInputElement>(null);
   const editZipRef = useRef<HTMLInputElement>(null);
+  const editCountryRef = useRef<HTMLInputElement>(null);
   function fillEditAddress(found: FoundAddress) {
     if (editAddressRef.current) editAddressRef.current.value = `${found.street} ${found.houseNumber}`.trim();
     if (editCityRef.current) editCityRef.current.value = found.city;
     if (editZipRef.current) editZipRef.current.value = found.postcode;
+    if (editCountryRef.current) editCountryRef.current.value = "Netherlands";
   }
 
   const clients = useQuery({
@@ -71,11 +76,20 @@ function ClientsContent() {
   });
 
   const createClient = useMutation({
-    mutationFn: async (data: any) => (await api.clients.$post({ json: data })).json(),
+    mutationFn: async (data: any) => {
+      const res = await api.clients.$post({ json: data });
+      const json = await res.json();
+      if (!res.ok) throw new Error((json as { message?: string })?.message ?? "Failed to create client");
+      return json;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["clients"] });
       setShowForm(false);
       setPendingClientData(null);
+      setCreateError(null);
+    },
+    onError: (err: any) => {
+      setCreateError(err?.message ?? "Failed to create client.");
     },
   });
 
@@ -172,7 +186,12 @@ function ClientsContent() {
           <h1 className="font-display text-3xl font-semibold">Clients</h1>
           <p className="text-muted-foreground mt-1">{clientList.length} clients</p>
         </div>
-        <Button onClick={() => setShowForm(true)}>
+        <Button
+          onClick={() => {
+            setCreateError(null);
+            setShowForm(true);
+          }}
+        >
           <Plus className="size-4" /> Add client
         </Button>
       </div>
@@ -260,6 +279,7 @@ function ClientsContent() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                setCreateError(null);
                 const fd = new FormData(e.currentTarget);
                 const data = {
                   name: fd.get("name"),
@@ -294,7 +314,7 @@ function ClientsContent() {
                 <input ref={addZipRef} name="zipCode" placeholder="Zip Code" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
                 <input ref={addCityRef} name="city" placeholder="City" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               </div>
-              <input name="country" placeholder="Country" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <input ref={addCountryRef} name="country" placeholder="Country" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground">Date of birth</label>
@@ -310,6 +330,7 @@ function ClientsContent() {
                 <input name="preferredLanguage" aria-label="Preferred language" list="client-language-options" placeholder="Language" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               </div>
               <input name="referralSource" aria-label="How they found the studio" list="client-referral-options" placeholder="How did they find the studio?" className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              {createError && <p className="text-sm text-destructive">{createError}</p>}
               <Button type="submit" className="w-full" disabled={createClient.isPending}>
                 {createClient.isPending ? "Saving…" : "Save client"}
               </Button>
@@ -419,7 +440,7 @@ function ClientsContent() {
                 <input ref={editZipRef} name="zipCode" placeholder="Zip Code" defaultValue={editingClient.zipCode ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
                 <input ref={editCityRef} name="city" placeholder="City" defaultValue={editingClient.city ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               </div>
-              <input name="country" placeholder="Country" defaultValue={editingClient.country ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
+              <input ref={editCountryRef} name="country" placeholder="Country" defaultValue={editingClient.country ?? ""} className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm" />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground">Date of birth</label>

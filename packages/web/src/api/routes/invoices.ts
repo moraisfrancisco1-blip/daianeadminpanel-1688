@@ -480,6 +480,8 @@ export const invoicesRoute = new Hono()
     }
 
     if (isRepurposedCancelled) {
+      // The old booking must stop pointing at this invoice, or it keeps showing the new client's invoice.
+      await db.update(bookings).set({ invoiceId: null }).where(eq(bookings.invoiceId, id));
       await recordInvoiceActivity({
         invoiceId: id,
         type: "status_changed",

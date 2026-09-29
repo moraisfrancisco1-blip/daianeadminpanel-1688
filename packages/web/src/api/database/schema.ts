@@ -25,7 +25,8 @@ export const clients = sqliteTable("clients", {
   preferredLanguage: text("preferred_language"),
   tags: text("tags"), // JSON array of short labels, e.g. ["Post-partum","Diastasis"]
   debtorNumber: text("debtor_number"),
-  stripeCustomerId: text("stripe_customer_id").unique(),
+  // Not unique: siblings/family members can legitimately share one Stripe customer (and thus this id).
+  stripeCustomerId: text("stripe_customer_id"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),

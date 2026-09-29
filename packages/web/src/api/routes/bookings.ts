@@ -744,6 +744,17 @@ export const bookingsRoute = new Hono()
       return c.json({ message: "The selected time is not available" }, 409);
     }
 
+    // Explicit reassignment to a different client (the "Cliente" picker below) — distinct from
+    // just correcting this booking's own name/email/phone. Two clients can share one contact
+    // (e.g. siblings booking under the same phone/email), so picking one by id is the only
+    // reliable way to say "this session is actually theirs" without the name-matching sync
+    // below mistaking it for a typo fix and relabelling the other client's sessions too.
+    const reassigningClient = "clientId" in body && body.clientId != null && Number(body.clientId) !== existing.clientId;
+    if (reassigningClient) {
+      const [targetClient] = await db.select().from(clients).where(eq(clients.id, Number(body.clientId)));
+      if (!targetClient) return c.json({ message: "Client not found" }, 400);
+    }
+
     // Discount fields are only touched when the caller actually sends them —
     // the drag-to-reschedule action only sends { date, startTime } and must
     // never wipe out a discount set earlier through the edit modal.
@@ -755,6 +766,7 @@ export const bookingsRoute = new Hono()
     const [booking] = await db
       .update(bookings)
       .set({
+        clientId: reassigningClient ? Number(body.clientId) : existing.clientId,
         name: body.name ?? existing.name,
         email: body.email ?? existing.email,
         phone: body.phone ?? existing.phone,
@@ -798,8 +810,9 @@ export const bookingsRoute = new Hono()
     // Booking → client: correcting a name/phone/email directly on a booking should also fix
     // it on the client record (and, from there, cascade to that client's other bookings) —
     // the same rule the client-edit page already applies, entered from this side. Never lets
-    // a sync hiccup fail the booking save itself.
-    if (existing.clientId) {
+    // a sync hiccup fail the booking save itself. Skipped on an explicit reassignment: the old
+    // client's other sessions must never be relabelled just because this one moved to someone else.
+    if (existing.clientId && !reassigningClient) {
       try {
         const contactBefore: Contact = {
           name: existing.name, email: existing.email, phone: existing.phone,

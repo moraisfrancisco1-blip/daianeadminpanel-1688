@@ -5,8 +5,9 @@ import { Time24Input } from "../components/time-24-input";
 import { findConflicts } from "../lib/conflicts";
 import { layoutOverlaps } from "../lib/day-layout";
 import { api } from "../lib/api";
+import { normalize, idFromQuery } from "../lib/list";
 import { Link, useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse, Percent, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse, Percent, RotateCcw, Search, Pencil } from "lucide-react";
 
 const FAR_DATE_WARNING_DAYS = 15;
 
@@ -870,6 +871,36 @@ function BookingDetailModal(props: {
   const [name, setName] = useState(booking.name);
   const [email, setEmail] = useState(booking.email);
   const [phone, setPhone] = useState(booking.phone ?? "");
+  // Which client this session is linked to. Kept separate from name/email/phone above:
+  // two clients can share one contact (e.g. siblings on the same phone/email), so picking one
+  // explicitly by id is the only reliable way to move a session between them — see the
+  // "Cliente" picker below and the matching guard in PUT /bookings/:id.
+  const [clientId, setClientId] = useState(booking.clientId);
+  const [clientSearch, setClientSearch] = useState("");
+  const clientSearchRef = useRef<HTMLDivElement>(null);
+  const clientsQ = useQuery({
+    queryKey: ["clients"],
+    queryFn: async () => (await api.clients.$get()).json(),
+  });
+  const allClients = ((clientsQ.data as { clients?: { id: number; name: string; email: string | null; phone: string | null }[] } | undefined)?.clients) ?? [];
+  const linkedClient = allClients.find((cl) => cl.id === clientId) ?? null;
+  const clientSearchQ = normalize(clientSearch);
+  const clientSearchId = idFromQuery(clientSearch);
+  const filteredClients = allClients
+    .filter((cl) => {
+      if (!clientSearchQ) return false;
+      if (clientSearchId !== null && cl.id === clientSearchId) return true;
+      return normalize([cl.name, cl.email, cl.phone].filter(Boolean).join(" ")).includes(clientSearchQ);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, 8);
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (clientSearchRef.current && !clientSearchRef.current.contains(e.target as Node)) setClientSearch("");
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, []);
   const [serviceId, setServiceId] = useState(booking.serviceId ?? services[0]?.id ?? 0);
   const [date, setDate] = useState(booking.date);
   const [startTime, setStartTime] = useState(booking.startTime);
@@ -970,14 +1001,14 @@ function BookingDetailModal(props: {
   // Read-only reference: the client's standing clinical notes (tension areas,
   // contraindications, history) — useful context while reviewing this session.
   const clinicalNotesQ = useQuery({
-    queryKey: ["client-clinical-notes", booking.clientId],
+    queryKey: ["client-clinical-notes", clientId],
     queryFn: async () => {
-      const res = await fetch(`/api/clients/${booking.clientId}`);
+      const res = await fetch(`/api/clients/${clientId}`);
       if (!res.ok) return null;
       const data = await res.json();
       return (data.client?.clinicalNotes as string | null) ?? null;
     },
-    enabled: !!booking.clientId,
+    enabled: !!clientId,
   });
 
   async function requestPaymentLink() {
@@ -1021,14 +1052,63 @@ function BookingDetailModal(props: {
         <h2 className="font-display text-xl font-semibold">Detalhes da reserva</h2>
 
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <div className="col-span-2">
+          <div className="col-span-2" ref={clientSearchRef}>
             <p className="text-xs text-muted-foreground">Cliente</p>
-            {booking.clientId ? (
-              <Link to={`/clients/${booking.clientId}`} className="font-medium text-brand-copper hover:underline">
-                {booking.name}
-              </Link>
-            ) : (
-              <p className="font-medium">{booking.name}</p>
+            <div className="flex items-center gap-2">
+              {linkedClient ? (
+                <Link to={`/clients/${linkedClient.id}`} className="font-medium text-brand-copper hover:underline">
+                  {linkedClient.name}
+                </Link>
+              ) : (
+                <p className="font-medium">{booking.name}</p>
+              )}
+              <button
+                type="button"
+                aria-label="Trocar cliente desta sessão"
+                onClick={() => setClientSearch(clientSearch ? "" : " ")}
+                className="text-muted-foreground hover:text-foreground"
+                title="Trocar cliente desta sessão"
+              >
+                <Pencil className="size-3.5" />
+              </button>
+            </div>
+            {clientSearch && (
+              <div className="relative mt-1.5">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+                <input
+                  aria-label="Procurar outro cliente"
+                  value={clientSearch.trim()}
+                  onChange={(e) => setClientSearch(e.target.value || " ")}
+                  placeholder="Procurar outro cliente por nome, email, telefone ou #ID…"
+                  className="w-full h-9 pl-8 pr-3 rounded-md border border-input bg-background text-xs"
+                />
+                {clientSearch.trim() && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-card border border-border rounded-lg shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+                    {filteredClients.map((cl) => (
+                      <button
+                        key={cl.id}
+                        type="button"
+                        onClick={() => {
+                          setClientId(cl.id);
+                          setName(cl.name);
+                          setEmail(cl.email ?? "");
+                          setPhone(cl.phone ?? "");
+                          setClientSearch("");
+                        }}
+                        className="w-full px-3 py-2 text-left text-sm hover:bg-accent transition-colors border-b border-border last:border-b-0"
+                      >
+                        <div className="font-medium">{cl.name}</div>
+                        <div className="text-xs text-muted-foreground flex flex-wrap gap-x-2">
+                          {cl.email && <span>{cl.email}</span>}
+                          {cl.phone && <span>{cl.phone}</span>}
+                          <span className="text-brand-copper font-medium">#{cl.id}</span>
+                        </div>
+                      </button>
+                    ))}
+                    {filteredClients.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">Nenhum cliente encontrado.</p>}
+                  </div>
+                )}
+              </div>
             )}
           </div>
           <div>
@@ -1248,6 +1328,7 @@ function BookingDetailModal(props: {
           <button
             onClick={() =>
               onSave({
+                clientId,
                 name,
                 email,
                 phone: phone || null,
