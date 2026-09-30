@@ -12,7 +12,7 @@ import { changeInvoiceStatus, recordInvoiceActivity } from "../services/invoice-
 import { COMPANY, getCompanyInvoiceDetails } from "../lib/company";
 import { stripe } from "../services/stripe";
 import { voidStripeInvoice, deleteStripeInvoice } from "../services/stripe-sync";
-import { getOrCreateCheckoutUrl, ensurePayToken, payUrl } from "../lib/invoice-checkout";
+import { getCheckoutResult, ensurePayToken, payUrl } from "../lib/invoice-checkout";
 
 export const invoicesRoute = new Hono()
   .get("/", requireAuth, async (c) => {
@@ -346,8 +346,8 @@ export const invoicesRoute = new Hono()
     // creates one lazily on first click — but doing it here surfaces a Stripe misconfiguration
     // immediately instead of only when the client actually clicks.
     const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
-    const primed = await getOrCreateCheckoutUrl(invoice, client, origin);
-    if (!primed) return c.json({ message: "Stripe not configured or could not create payment link" }, 500);
+    const primed = await getCheckoutResult(invoice, client, origin);
+    if ("reason" in primed) return c.json({ message: primed.reason }, 500);
 
     // Our own domain, never Stripe's directly: Stripe caps a Checkout Session at 24h, so a
     // one-time link emailed today would be dead by the time an out-of-town client pays next week.
@@ -384,8 +384,8 @@ export const invoicesRoute = new Hono()
     if (!client) return c.json({ message: "Client not found" }, 404);
 
     const origin = c.req.header("origin") ?? process.env.WEBSITE_URL ?? "";
-    const primed = await getOrCreateCheckoutUrl(invoice, client, origin);
-    if (!primed) return c.json({ message: "Stripe not configured or could not create checkout" }, 500);
+    const primed = await getCheckoutResult(invoice, client, origin);
+    if ("reason" in primed) return c.json({ message: primed.reason }, 500);
 
     // Our own domain, never Stripe's directly — see /send-payment-link for why.
     const durableUrl = payUrl(await ensurePayToken(invoice));

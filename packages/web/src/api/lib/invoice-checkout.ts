@@ -5,6 +5,8 @@ import { eq } from "drizzle-orm";
 import { stripe } from "../services/stripe";
 import { findStripeCustomerByEmail, createStripeCustomer } from "../services/stripe-sync";
 
+export type CheckoutResult = { url: string } | { reason: string };
+
 async function ensureStripeCustomerId(client: typeof clients.$inferSelect): Promise<string | null> {
   if (client.stripeCustomerId) return client.stripeCustomerId;
   if (!stripe) return null;
@@ -39,22 +41,45 @@ export async function getOrCreateCheckoutUrl(
   client: typeof clients.$inferSelect,
   origin: string,
 ): Promise<string | null> {
-  if (!stripe) return null;
-  if (invoice.status === "paid" || invoice.status === "cancelled") return null;
+  const result = await getCheckoutResult(invoice, client, origin);
+  return "url" in result ? result.url : null;
+}
+
+/** Like getOrCreateCheckoutUrl, but says *why* no link could be produced. */
+export async function getCheckoutResult(
+  invoice: typeof invoices.$inferSelect,
+  client: typeof clients.$inferSelect,
+  origin: string,
+): Promise<CheckoutResult> {
+  if (!stripe) return { reason: "Stripe is not configured on the server (STRIPE_SECRET_KEY is missing)" };
+  if (invoice.status === "paid" || invoice.status === "cancelled") {
+    return { reason: `Invoice is ${invoice.status}` };
+  }
 
   if (invoice.stripeCheckoutSessionId) {
     try {
       const existing = await stripe.checkout.sessions.retrieve(invoice.stripeCheckoutSessionId);
       if (existing.url && (existing.status === "open" || existing.status === "complete")) {
-        return existing.url;
+        return { url: existing.url };
       }
     } catch {
       // fall through and create a new session
     }
   }
 
-  const customerId = await ensureStripeCustomerId(client);
-  if (!customerId) return null;
+  let customerId: string | null;
+  try {
+    customerId = await ensureStripeCustomerId(client);
+  } catch (err) {
+    return { reason: `Stripe customer lookup failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  if (!customerId) {
+    return {
+      reason: client.email
+        ? `Could not find or create a Stripe customer for ${client.email} (several Stripe customers may share this email, or the Stripe key is invalid)`
+        : "Client has no email, so no Stripe customer could be created",
+    };
+  }
 
   const metadata: Record<string, string> = {
     adminInvoiceId: String(invoice.id),
@@ -63,7 +88,9 @@ export async function getOrCreateCheckoutUrl(
   };
   if (invoice.bookingId) metadata.bookingId = String(invoice.bookingId);
 
-  const session = await stripe.checkout.sessions.create({
+  let session: Awaited<ReturnType<typeof stripe.checkout.sessions.create>>;
+  try {
+    session = await stripe.checkout.sessions.create({
     mode: "payment",
     line_items: [
       {
@@ -82,10 +109,13 @@ export async function getOrCreateCheckoutUrl(
     // Propagate metadata to the PaymentIntent so payment_intent.succeeded can also
     // identify the Admin invoice (Checkout Session metadata is NOT copied automatically).
     payment_intent_data: { metadata },
-  });
+    });
+  } catch (err) {
+    return { reason: `Stripe rejected the checkout: ${err instanceof Error ? err.message : String(err)}` };
+  }
 
   await db.update(invoices).set({ stripeCheckoutSessionId: session.id }).where(eq(invoices.id, invoice.id));
-  return session.url ?? null;
+  return session.url ? { url: session.url } : { reason: "Stripe returned no checkout URL" };
 }
 
 export const PAY_TOKEN_RE = /^[a-f0-9]{32}$/;
