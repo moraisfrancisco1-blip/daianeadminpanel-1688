@@ -52,7 +52,7 @@ export async function createStripeCustomer(client: {
   city: string | null;
   country: string | null;
   zipCode: string | null;
-}): Promise<string | null> {
+}, opts?: { throwOnError?: boolean }): Promise<string | null> {
   if (!stripe) {
     console.warn("[stripe-sync] Stripe not configured, skipping customer creation");
     return null;
@@ -70,6 +70,9 @@ export async function createStripeCustomer(client: {
       }
       if (existingIds.length > 1) {
         console.warn(`[stripe-sync] Multiple Stripe customers for email ${email} — NOT creating a new one, manual review needed:`, existingIds);
+        if (opts?.throwOnError) {
+          throw new Error(`Multiple Stripe customers share the email ${email} (${existingIds.join(", ")}) — merge or delete the duplicates in Stripe`);
+        }
         return null;
       }
     }
@@ -98,6 +101,7 @@ export async function createStripeCustomer(client: {
     return customer.id;
   } catch (error) {
     console.error("[stripe-sync] Error creating customer in Stripe:", error);
+    if (opts?.throwOnError) throw error;
     return null;
   }
 }

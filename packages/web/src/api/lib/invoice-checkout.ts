@@ -20,7 +20,7 @@ async function ensureStripeCustomerId(client: typeof clients.$inferSelect): Prom
       city: client.city ?? null,
       country: client.country ?? null,
       zipCode: client.zipCode ?? null,
-    });
+    }, { throwOnError: true });
   }
   if (customerId) {
     await db.update(clients).set({ stripeCustomerId: customerId }).where(eq(clients.id, client.id));
@@ -71,7 +71,7 @@ export async function getCheckoutResult(
   try {
     customerId = await ensureStripeCustomerId(client);
   } catch (err) {
-    return { reason: `Stripe customer lookup failed: ${err instanceof Error ? err.message : String(err)}` };
+    return { reason: `Could not get a Stripe customer for this client: ${err instanceof Error ? err.message : String(err)}` };
   }
   if (!customerId) {
     return {
