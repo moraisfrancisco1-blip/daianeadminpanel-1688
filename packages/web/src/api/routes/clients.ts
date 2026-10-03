@@ -4,7 +4,8 @@ import { clients, invoices, bookings, payments, quotes, services, clientNotes, p
 import { eq, desc, inArray, or } from "drizzle-orm";
 import { computeDiscountAmount, round2, type DiscountType } from "../lib/totals";
 import { requireAuth } from "../middleware/auth";
-import { createStripeCustomer, updateStripeCustomer, findStripeCustomerByEmail } from "../services/stripe-sync";
+import { stripe } from "../services/stripe";
+import { normalizeEmail, createStripeCustomer, updateStripeCustomer, findStripeCustomerByEmail } from "../services/stripe-sync";
 import { syncBookingsToClient, CONTACT_FIELDS } from "../lib/client-sync";
 
 function parseTags(raw: string | null): string[] {
@@ -36,6 +37,24 @@ export const clientsRoute = new Hono()
   .get("/", requireAuth, async (c) => {
     const all = await db.select().from(clients).orderBy(desc(clients.createdAt));
     return c.json({ clients: all }, 200);
+  })
+  // Read-only: lists Stripe customers that share an email (these block payment links).
+  .get("/stripe-duplicates", requireAuth, async (c) => {
+    if (!stripe) return c.json({ message: "Stripe is not configured" }, 500);
+    const byEmail = new Map<string, { id: string; name: string | null; created: string }[]>();
+    let total = 0;
+    for await (const cust of stripe.customers.list({ limit: 100 })) {
+      total++;
+      const email = normalizeEmail(cust.email);
+      if (!email) continue;
+      const list = byEmail.get(email) ?? [];
+      list.push({ id: cust.id, name: cust.name, created: new Date(cust.created * 1000).toISOString() });
+      byEmail.set(email, list);
+    }
+    const duplicates = [...byEmail.entries()]
+      .filter(([, list]) => list.length > 1)
+      .map(([email, customers]) => ({ email, customers: customers.sort((a, b) => a.created.localeCompare(b.created)) }));
+    return c.json({ totalStripeCustomers: total, duplicateEmails: duplicates.length, duplicates }, 200);
   })
   .get("/:id", requireAuth, async (c) => {
     const id = Number(c.req.param("id"));
