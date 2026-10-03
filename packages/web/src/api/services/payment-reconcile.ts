@@ -46,8 +46,10 @@ export function derivePaymentState(
   const pi = invoice.stripePaymentIntentStatus;
 
   if (invoice.status === "paid") {
-    if (!hasPayment) return { state: "attention", problem: "paid_but_no_payment_record" };
-    if (!invoice.paidAt) return { state: "attention", problem: "paid_but_no_paid_at" };
+    // A fully discounted (€0.00) invoice never goes through Stripe, so there is no payment to record.
+    const isZeroTotal = Math.abs(Number(invoice.total) || 0) < 0.005;
+    if (!hasPayment && !isZeroTotal) return { state: "attention", problem: "paid_but_no_payment_record" };
+    if (!invoice.paidAt && !isZeroTotal) return { state: "attention", problem: "paid_but_no_paid_at" };
     if (refundedAmount > 0) {
       return refundedAmount >= invoice.total ? { state: "refunded", problem: null } : { state: "partially_refunded", problem: null };
     }
