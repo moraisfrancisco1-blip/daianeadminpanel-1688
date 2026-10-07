@@ -48,7 +48,7 @@ export const clientsRoute = new Hono()
       const email = normalizeEmail(cust.email);
       if (!email) continue;
       const list = byEmail.get(email) ?? [];
-      list.push({ id: cust.id, name: cust.name, created: new Date(cust.created * 1000).toISOString() });
+      list.push({ id: cust.id, name: cust.name ?? null, created: new Date(cust.created * 1000).toISOString() });
       byEmail.set(email, list);
     }
     const duplicates = [...byEmail.entries()]

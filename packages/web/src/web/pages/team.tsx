@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { authClient, useSession } from "../lib/auth-client";
-import { Plus, X, Loader2, ShieldBan, ShieldCheck, Trash2 } from "lucide-react";
+import { Plus, X, Loader2, ShieldBan, ShieldCheck, Trash2, KeyRound } from "lucide-react";
 
 type TeamUser = {
   id: string;
@@ -25,6 +25,7 @@ function TeamContent() {
   const { data: session } = useSession();
   const myId = session?.user?.id;
   const [showForm, setShowForm] = useState(false);
+  const [resetFor, setResetFor] = useState<TeamUser | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const notify = (m: string) => {
@@ -158,6 +159,14 @@ function TeamContent() {
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
                           <button
+                            onClick={() => setResetFor(u)}
+                            disabled={isMe}
+                            title={isMe ? "Change your own password in Profile" : "Set a new password"}
+                            className="p-1.5 rounded text-muted-foreground hover:text-primary disabled:opacity-30"
+                          >
+                            <KeyRound className="size-4" />
+                          </button>
+                          <button
                             onClick={() => toggleBan.mutate({ userId: u.id, ban: !u.banned })}
                             disabled={isMe || toggleBan.isPending}
                             title={u.banned ? "Restore access" : "Revoke access"}
@@ -185,6 +194,17 @@ function TeamContent() {
           </table>
         </div>
       </div>
+
+      {resetFor && (
+        <SetPasswordForm
+          user={resetFor}
+          onClose={() => setResetFor(null)}
+          onDone={() => {
+            setResetFor(null);
+            notify("Password updated.");
+          }}
+        />
+      )}
 
       {showForm && (
         <AddTeamMemberForm
@@ -265,6 +285,62 @@ function AddTeamMemberForm(props: { onClose: () => void; onCreated: () => void }
           className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
         >
           {saving && <Loader2 className="size-4 animate-spin" />} Create account
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SetPasswordForm(props: { user: TeamUser; onClose: () => void; onDone: () => void }) {
+  const { user, onClose, onDone } = props;
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setError("");
+    if (password.length < 8) {
+      setError("The password must be at least 8 characters.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await authClient.admin.setUserPassword({ userId: user.id, newPassword: password });
+      if (error) throw new Error(error.message ?? "Failed to set the password.");
+      onDone();
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to set the password.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-card rounded-xl p-6 w-full max-w-sm space-y-3 relative">
+        <button onClick={onClose} className="absolute top-4 right-4 text-muted-foreground">
+          <X className="size-4" />
+        </button>
+        <h2 className="font-display text-xl font-semibold">Set new password</h2>
+        <p className="text-sm text-muted-foreground">
+          For <strong className="text-foreground">{user.name}</strong> ({user.email}). Give it to them privately; they can
+          change it afterwards in Profile.
+        </p>
+        <input
+          type="text"
+          autoComplete="off"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="New password (min. 8 characters)"
+          className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+        />
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <button
+          onClick={save}
+          disabled={saving}
+          className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
+        >
+          {saving && <Loader2 className="size-4 animate-spin" />} Save password
         </button>
       </div>
     </div>

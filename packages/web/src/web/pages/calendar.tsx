@@ -914,7 +914,7 @@ function BookingDetailModal(props: {
   const [sendInvoiceLoading, setSendInvoiceLoading] = useState(false);
   const [sendInvoiceMsg, setSendInvoiceMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [reopenLoading, setReopenLoading] = useState(false);
-  const [generatedInvoice, setGeneratedInvoice] = useState<{ id: number; invoiceNumber: string; status: string; total: number } | null>(
+  const [generatedInvoice, setGeneratedInvoice] = useState<{ id: number; invoiceNumber: string; status: string; total: number; paidAt?: string | null } | null>(
     null,
   );
   const [generateInvoiceLoading, setGenerateInvoiceLoading] = useState(false);
