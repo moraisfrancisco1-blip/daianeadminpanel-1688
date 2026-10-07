@@ -6,6 +6,7 @@ import { requireAuth } from "../middleware/auth";
 import { sendTrackedEmail } from "../services/email-log";
 import { buildReminderEmailHtml, buildPostSessionEmailHtml, buildSessionReminderEmailHtml, buildRebookReminderEmailHtml } from "../lib/email-templates";
 import { COMPANY } from "../lib/company";
+import { runPaymentVerification } from "../services/payment-reconcile";
 import { services } from "../database/schema";
 
 const REMINDER_DAYS_AFTER_DUE = 10;
@@ -250,7 +251,9 @@ export const remindersRoute = new Hono()
     const postSession = await runPostSessionEmails();
     const sessionReminders = await runSessionReminderCheck();
     const rebook = await runRebookReminderCheck();
-    return c.json({ sent, postSession, sessionReminders, rebook }, 200);
+    // A Stripe hiccup must never stop the reminder emails above from being reported.
+    const payments = await runPaymentVerification().catch((err) => ({ error: err instanceof Error ? err.message : String(err) }));
+    return c.json({ sent, postSession, sessionReminders, rebook, payments }, 200);
   })
   // Send the post-session review/promo email immediately for one booking.
   .post("/post-session/:bookingId/send-now", requireAuth, async (c) => {

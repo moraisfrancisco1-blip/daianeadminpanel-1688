@@ -16,6 +16,7 @@ import { paymentsRoute } from "./routes/payments";
 import { reportsRoute } from "./routes/reports";
 import { packagesRoute } from "./routes/packages";
 import { emailsRoute } from "./routes/emails";
+import { paymentCronRoute } from "./routes/payment-cron";
 import { paymentControlRoute } from "./routes/payment-control";
 import { refundsRoute } from "./routes/refunds";
 import { messagesRoute } from "./routes/messages";
@@ -107,6 +108,7 @@ const app = new Hono()
   .route("/invoices", invoicesRoute)
   .route("/bookings", bookingsRoute)
   .route("/reminders", remindersRoute)
+  .route("/payment-cron", paymentCronRoute)
   .route("/exports", exportsRoute)
   .route("/dashboard", dashboardRoute)
   .route("/reports", reportsRoute)
