@@ -7,7 +7,7 @@ import { layoutOverlaps } from "../lib/day-layout";
 import { api } from "../lib/api";
 import { normalize, idFromQuery } from "../lib/list";
 import { Link, useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse, Percent, RotateCcw, Search, Pencil } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Lock, X, Loader2, Trash2, Link2, Copy, ExternalLink, Send, AlertTriangle, FileText, HeartPulse, Percent, RotateCcw, Search, Pencil, CheckCircle2, XCircle, Clock } from "lucide-react";
 
 const FAR_DATE_WARNING_DAYS = 15;
 
@@ -992,7 +992,7 @@ function BookingDetailModal(props: {
       const res = await fetch(`/api/invoices/${booking.invoiceId}`);
       if (!res.ok) return null;
       const data = await res.json();
-      return data.invoice as { id: number; invoiceNumber: string; status: string; total: number };
+      return data.invoice as { id: number; invoiceNumber: string; status: string; total: number; paidAt?: string | null };
     },
     enabled: !!booking.invoiceId,
   });
@@ -1258,6 +1258,39 @@ function BookingDetailModal(props: {
               Generate invoice
             </button>
             {generateInvoiceError && <p className="text-sm text-destructive">{generateInvoiceError}</p>}
+          </div>
+        )}
+
+        {effectiveInvoice && (
+          <div
+            className={`border-t pt-3 flex items-center gap-2 text-sm font-medium ${
+              effectiveInvoice.status === "paid"
+                ? "text-[#4C7A56]"
+                : effectiveInvoice.status === "cancelled"
+                  ? "text-muted-foreground"
+                  : "text-amber-600"
+            }`}
+          >
+            {effectiveInvoice.status === "paid" ? (
+              <CheckCircle2 className="size-4" />
+            ) : effectiveInvoice.status === "cancelled" ? (
+              <XCircle className="size-4" />
+            ) : (
+              <Clock className="size-4" />
+            )}
+            <span>
+              {effectiveInvoice.status === "paid"
+                ? `Pagamento recebido · €${effectiveInvoice.total.toFixed(2)}${
+                    effectiveInvoice.paidAt ? ` · ${new Date(effectiveInvoice.paidAt).toLocaleDateString("pt-PT")}` : ""
+                  }`
+                : effectiveInvoice.status === "cancelled"
+                  ? "Fatura cancelada"
+                  : effectiveInvoice.status === "draft"
+                    ? "Fatura criada, ainda não enviada"
+                    : "A aguardar pagamento"}
+              {" · "}
+              {effectiveInvoice.invoiceNumber}
+            </span>
           </div>
         )}
 

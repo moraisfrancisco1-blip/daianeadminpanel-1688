@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Protected } from "../components/protected";
 import { api } from "../lib/api";
@@ -77,18 +77,48 @@ function PaymentControlContent() {
   });
 
   const verify = useMutation({
-    mutationFn: async () => (await api["payment-control"].verify.$post()).json(),
-    onSuccess: (d: any) => {
+    mutationFn: async (_auto?: boolean) => (await api["payment-control"].verify.$post()).json(),
+    onSuccess: (d: any, auto) => {
       qc.invalidateQueries({ queryKey: ["payment-control"] });
       qc.invalidateQueries({ queryKey: ["invoices"] });
+      qc.invalidateQueries({ queryKey: ["invoice"] });
+      if (auto && !d?.fixed) return; // automatic run with nothing fixed — stay quiet
       setToast(`Verify done: ${d.checked} checked, ${d.fixed} fixed, ${d.skipped ?? 0} already settled (skipped).`);
       setTimeout(() => setToast(null), 5000);
     },
-    onError: (e: any) => {
+    onError: (e: any, auto) => {
+      if (auto) return;
       setToast(`Verify failed: ${e?.message ?? "error"}`);
       setTimeout(() => setToast(null), 5000);
     },
   });
+
+  // Auto-verify while this page is open, so nobody has to keep pressing the button.
+  const AUTO_VERIFY_MS = 2 * 60 * 1000;
+  const [autoVerify, setAutoVerify] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("payment-control-auto-verify") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const verifyRef = useRef(verify);
+  verifyRef.current = verify;
+  useEffect(() => {
+    try {
+      localStorage.setItem("payment-control-auto-verify", autoVerify ? "on" : "off");
+    } catch {
+      // storage unavailable — the toggle just won't be remembered
+    }
+    if (!autoVerify) return;
+    const tick = () => {
+      if (document.visibilityState !== "visible" || verifyRef.current.isPending) return;
+      verifyRef.current.mutate(true);
+    };
+    tick();
+    const id = setInterval(tick, AUTO_VERIFY_MS);
+    return () => clearInterval(id);
+  }, [autoVerify]);
 
   const summary = query.data?.summary;
   const rows = query.data?.payments ?? [];
@@ -118,8 +148,12 @@ function PaymentControlContent() {
             {summary?.stripeConfigured ? <ShieldCheck className="size-4 text-[#4C7A56]" /> : <ShieldAlert className="size-4 text-red-600" />}
             {summary?.stripeConfigured ? "Stripe connected" : "Stripe not configured"}
           </span>
+          <label className="text-xs text-muted-foreground inline-flex items-center gap-1.5 cursor-pointer select-none">
+            <input type="checkbox" checked={autoVerify} onChange={(e) => setAutoVerify(e.target.checked)} />
+            Auto-verify every 2 min
+          </label>
           <button
-            onClick={() => verify.mutate()}
+            onClick={() => verify.mutate(false)}
             disabled={verify.isPending}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-copper text-white hover:bg-brand-copper/90 disabled:opacity-50"
           >
