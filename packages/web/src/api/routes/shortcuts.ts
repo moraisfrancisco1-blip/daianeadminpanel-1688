@@ -261,7 +261,13 @@ export const shortcutsRoute = new Hono()
     const date = String(body.date ?? "");
     const startTime = String(body.startTime ?? "");
     if (!Number.isInteger(clientId) || !Number.isInteger(serviceId) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(startTime)) {
-      return c.json({ message: "clientId, serviceId, date (YYYY-MM-DD) and startTime (HH:MM) are required", summary: "Faltam dados: cliente, serviço, dia ou hora." }, 400);
+      const problems = [
+        !Number.isInteger(clientId) ? `cliente (recebi "${String(body.clientRef ?? body.clientId ?? "")}")` : null,
+        !Number.isInteger(serviceId) ? `serviço (recebi "${String(body.serviceRef ?? body.serviceId ?? "")}")` : null,
+        !/^\d{4}-\d{2}-\d{2}$/.test(date) ? `dia (recebi "${date}", devia ser 2026-10-20)` : null,
+        !/^\d{2}:\d{2}$/.test(startTime) ? `hora (recebi "${startTime}", devia ser 15:00)` : null,
+      ].filter(Boolean);
+      return c.json({ message: "clientId, serviceId, date (YYYY-MM-DD) and startTime (HH:MM) are required", summary: `Problema em: ${problems.join("; ")}.` }, 400);
     }
     const [client] = await db.select().from(clients).where(eq(clients.id, clientId));
     if (!client) return c.json({ message: "Client not found", summary: "Cliente não encontrada." }, 404);
