@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { put } from "@vercel/blob";
 import { db } from "../database";
-import { bookings, invoices, expenses } from "../database/schema";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { bookings, invoices, expenses, clients, packages } from "../database/schema";
+import { and, desc, eq, inArray, like, ne } from "drizzle-orm";
 import { requireShortcutsToken } from "../middleware/shortcuts-auth";
 import { extractExpenseFromFile } from "../services/expense-extract";
 import { recordAudit } from "../lib/audit";
+import { getCheckoutResult, ensurePayToken, payUrl } from "../lib/invoice-checkout";
 
 /**
  * iPhone Shortcuts / Scriptable widget API.
@@ -93,6 +94,96 @@ export const shortcutsRoute = new Hono()
     await recordAudit({ actor: ACTOR, action: "viewed", entityType: "shortcuts_stats" });
     return c.json(
       { revenueToday: round2(day), revenueWeek: round2(week), overdueCount, overdueTotal: round2(overdueTotal), awaitingCount },
+      200,
+    );
+  })
+  // Packages worth a renewal chat: 1 session left or fewer, or expiring within 14 days.
+  // First name + counts only — safe for a widget.
+  .get("/packages-expiring", async (c) => {
+    const rows = await db
+      .select({ name: clients.name, total: packages.totalSessions, used: packages.sessionsUsed, expiresAt: packages.expiresAt })
+      .from(packages)
+      .innerJoin(clients, eq(packages.clientId, clients.id));
+    const now = Date.now();
+    const items = rows
+      .map((r) => ({
+        name: firstName(r.name),
+        remaining: r.total - r.used,
+        daysLeft: r.expiresAt ? Math.ceil((r.expiresAt.getTime() - now) / 86_400_000) : null,
+      }))
+      .filter((r) => r.remaining > 0 && (r.remaining <= 1 || (r.daysLeft !== null && r.daysLeft <= 14)) && (r.daysLeft === null || r.daysLeft >= 0))
+      .sort((a, b) => (a.daysLeft ?? 999) - (b.daysLeft ?? 999) || a.remaining - b.remaining);
+    await recordAudit({ actor: ACTOR, action: "viewed", entityType: "shortcuts_packages", metadata: { count: items.length } });
+    return c.json({ total: items.length, items }, 200);
+  })
+  // "Próxima cliente": the next session today, and whether she has an active package / an unpaid invoice.
+  .get("/next", async (c) => {
+    const today = amsterdamDate();
+    const nowTime = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date());
+    const rows = await db
+      .select({ name: bookings.name, startTime: bookings.startTime, clientId: bookings.clientId, invoiceId: bookings.invoiceId })
+      .from(bookings)
+      .where(and(eq(bookings.date, today), inArray(bookings.status, ["confirmed", "pending_deposit"])));
+    const next = rows.filter((r) => r.startTime >= nowTime).sort((a, b) => a.startTime.localeCompare(b.startTime))[0];
+    if (!next) return c.json({ found: false, summary: "Não há mais marcações hoje." }, 200);
+
+    let hasActivePackage = false;
+    if (next.clientId) {
+      const pk = await db.select({ total: packages.totalSessions, used: packages.sessionsUsed, expiresAt: packages.expiresAt }).from(packages).where(eq(packages.clientId, next.clientId));
+      hasActivePackage = pk.some((p) => p.used < p.total && (!p.expiresAt || p.expiresAt.getTime() > Date.now()));
+    }
+    let paymentPending = false;
+    if (next.invoiceId) {
+      const [inv] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, next.invoiceId));
+      paymentPending = !!inv && inv.status !== "paid" && inv.status !== "cancelled";
+    }
+    const name = firstName(next.name);
+    const summary = `A seguir: ${name} às ${next.startTime}. ${hasActivePackage ? "Tem pacote ativo." : "Sem pacote ativo."} ${paymentPending ? "Pagamento pendente." : "Sem pagamento pendente."}`;
+    await recordAudit({ actor: ACTOR, action: "viewed", entityType: "shortcuts_next" });
+    return c.json({ found: true, name, time: next.startTime, hasActivePackage, paymentPending, summary }, 200);
+  })
+  // Client picker for the "Link de pagamento" shortcut (a person running her own shortcut, not a lock-screen widget).
+  .get("/clients", async (c) => {
+    const q = (c.req.query("q") ?? "").trim();
+    if (q.length < 2) return c.json({ clients: [] }, 200);
+    const rows = await db
+      .select({ id: clients.id, name: clients.name })
+      .from(clients)
+      .where(like(clients.name, `%${q.replace(/[%_]/g, "")}%`))
+      .limit(8);
+    await recordAudit({ actor: ACTOR, action: "searched", entityType: "shortcuts_clients", metadata: { results: rows.length } });
+    return c.json({ clients: rows }, 200);
+  })
+  // Durable payment link for a client's latest unpaid invoice (never creates or changes an invoice).
+  .post("/payment-link", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const clientId = Number((body as { clientId?: unknown }).clientId);
+    if (!Number.isInteger(clientId)) return c.json({ message: "clientId is required", summary: "Falta escolher a cliente." }, 400);
+
+    const [client] = await db.select().from(clients).where(eq(clients.id, clientId));
+    if (!client) return c.json({ message: "Client not found", summary: "Cliente não encontrada." }, 404);
+    const [invoice] = await db
+      .select()
+      .from(invoices)
+      .where(and(eq(invoices.clientId, clientId), eq(invoices.isTest, false), inArray(invoices.status, ["draft", "sent", "overdue"])))
+      .orderBy(desc(invoices.issueDate))
+      .limit(1);
+    if (!invoice) return c.json({ message: "No unpaid invoice", summary: `${firstName(client.name)} não tem faturas por pagar.` }, 404);
+
+    const origin = process.env.WEBSITE_URL ?? "";
+    const result = await getCheckoutResult(invoice, client, origin);
+    if ("reason" in result) return c.json({ message: result.reason, summary: result.reason }, 500);
+    const url = payUrl(await ensurePayToken(invoice));
+    await recordAudit({ actor: ACTOR, action: "payment_link_created", entityType: "invoice", entityId: invoice.id, metadata: { source: "shortcuts" } });
+    return c.json(
+      {
+        url,
+        invoiceNumber: invoice.invoiceNumber,
+        total: invoice.total,
+        phone: client.phone,
+        firstName: firstName(client.name),
+        summary: `Fatura ${invoice.invoiceNumber} · €${invoice.total.toFixed(2)}`,
+      },
       200,
     );
   })
