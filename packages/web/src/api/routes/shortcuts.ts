@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { put } from "@vercel/blob";
 import { db } from "../database";
-import { bookings, invoices, expenses, clients, packages } from "../database/schema";
-import { and, desc, eq, inArray, like, ne } from "drizzle-orm";
+import { bookings, invoices, expenses, clients, packages, services } from "../database/schema";
+import { and, desc, eq, gte, inArray, like, ne } from "drizzle-orm";
 import { requireShortcutsToken } from "../middleware/shortcuts-auth";
 import { extractExpenseFromFile } from "../services/expense-extract";
 import { recordAudit } from "../lib/audit";
+import { bookingsRoute } from "./bookings";
 import { getCheckoutResult, ensurePayToken, payUrl } from "../lib/invoice-checkout";
 
 /**
@@ -39,6 +40,17 @@ function addDays(dateStr: string, n: number): string {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
+
+// Booking goes through the SAME code path as the panel's manual booking (availability check, client
+// handling, invoice, confirmation emails) — never a second copy of those rules. This tiny wrapper
+// only supplies the signed-in "user" that route expects, and is reachable solely after the
+// SHORTCUTS_TOKEN check above.
+const asAdmin = new Hono()
+  .use("*", async (c, next) => {
+    (c as unknown as { set: (k: string, v: unknown) => void }).set("user", { id: null, email: ACTOR.email, role: "admin" });
+    await next();
+  })
+  .route("/", bookingsRoute);
 
 const firstName = (full: string) => full.trim().split(/\s+/)[0] ?? "";
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -186,6 +198,84 @@ export const shortcutsRoute = new Hono()
       },
       200,
     );
+  })
+  // Active services for the "Marcar sessão" picker.
+  .get("/services", async (c) => {
+    const rows = await db
+      .select({ id: services.id, name: services.name, price: services.price, durationMinutes: services.durationMinutes })
+      .from(services)
+      .where(eq(services.active, true));
+    return c.json({ services: rows }, 200);
+  })
+  // "Marcar sessão": client + service + day + time. 409 when the slot is taken.
+  .post("/book", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const clientId = Number(body.clientId);
+    const serviceId = Number(body.serviceId);
+    const date = String(body.date ?? "");
+    const startTime = String(body.startTime ?? "");
+    if (!Number.isInteger(clientId) || !Number.isInteger(serviceId) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(startTime)) {
+      return c.json({ message: "clientId, serviceId, date (YYYY-MM-DD) and startTime (HH:MM) are required", summary: "Faltam dados: cliente, serviço, dia ou hora." }, 400);
+    }
+    const [client] = await db.select().from(clients).where(eq(clients.id, clientId));
+    if (!client) return c.json({ message: "Client not found", summary: "Cliente não encontrada." }, 404);
+    if (!client.email) return c.json({ message: "Client has no email", summary: `${firstName(client.name)} não tem email — marca no painel.` }, 400);
+
+    const res = await asAdmin.request("/manual", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clientId, name: client.name, email: client.email, phone: client.phone, serviceId, date, startTime }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { message?: string; booking?: { id: number } };
+    if (!res.ok) {
+      const summary = res.status === 409 ? "Esse horário não está disponível." : (data.message ?? "Não foi possível marcar.");
+      return c.json({ message: data.message, summary }, res.status as 400 | 409 | 500);
+    }
+    await recordAudit({ actor: ACTOR, action: "created", entityType: "booking", entityId: data.booking?.id, metadata: { source: "shortcuts" } });
+    return c.json({ id: data.booking?.id, summary: `Marcado: ${firstName(client.name)} · ${date} às ${startTime}.` }, 201);
+  })
+  // "Fim de sessão" (NFC tag): marks today's most recent started session as completed.
+  // Package sessions are already deducted when the booking is made, and the review email goes out
+  // automatically after the delay, so nothing else is triggered here (no double deduction).
+  .post("/complete-session", async (c) => {
+    const today = amsterdamDate();
+    const nowTime = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date());
+    const rows = await db
+      .select({ id: bookings.id, name: bookings.name, startTime: bookings.startTime, status: bookings.status })
+      .from(bookings)
+      .where(and(eq(bookings.date, today), eq(bookings.status, "confirmed")));
+    const current = rows.filter((r) => r.startTime <= nowTime).sort((a, b) => b.startTime.localeCompare(a.startTime))[0];
+    if (!current) return c.json({ done: false, summary: "Não há nenhuma sessão em curso para concluir." }, 200);
+    await db.update(bookings).set({ status: "completed" }).where(eq(bookings.id, current.id));
+    await recordAudit({ actor: ACTOR, action: "completed", entityType: "booking", entityId: current.id, metadata: { source: "shortcuts" } });
+    return c.json({ done: true, summary: `Sessão das ${current.startTime} (${firstName(current.name)}) concluída.` }, 200);
+  })
+  // 7:00 briefing: counts and the first session — nothing clinical, safe on a lock screen.
+  .get("/briefing", async (c) => {
+    const today = amsterdamDate();
+    const sessions = await db
+      .select({ startTime: bookings.startTime })
+      .from(bookings)
+      .where(and(eq(bookings.date, today), inArray(bookings.status, ["confirmed", "pending_deposit"])));
+    sessions.sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+    const overdue = await db
+      .select({ total: invoices.total, status: invoices.status, dueDate: invoices.dueDate })
+      .from(invoices)
+      .where(and(eq(invoices.isTest, false), inArray(invoices.status, ["sent", "overdue"])));
+    const now = Date.now();
+    const late = overdue.filter((i) => i.status === "overdue" || i.dueDate.getTime() < now);
+
+    const since = new Date(now - 14 * 60 * 60 * 1000);
+    const overnight = await db.select({ id: bookings.id }).from(bookings).where(and(gte(bookings.createdAt, since), eq(bookings.isGroupBooking, false)));
+
+    const parts = [
+      sessions.length ? `${sessions.length} marcaç${sessions.length === 1 ? "ão" : "ões"} hoje, a primeira às ${sessions[0]!.startTime}` : "Sem marcações hoje",
+      late.length ? `${late.length} fatura${late.length === 1 ? "" : "s"} em atraso (€${round2(late.reduce((n, i) => n + i.total, 0))})` : "Sem faturas em atraso",
+      overnight.length ? `${overnight.length} nova${overnight.length === 1 ? "" : "s"} marcaç${overnight.length === 1 ? "ão" : "ões"} desde ontem` : null,
+    ].filter(Boolean);
+    await recordAudit({ actor: ACTOR, action: "viewed", entityType: "shortcuts_briefing" });
+    return c.json({ summary: parts.join(". ") + "." }, 200);
   })
   // Photo of a receipt -> blob storage + AI extraction. Saved flagged "REVER" in the notes so it
   // is obvious in the Expenses page that a person still has to check it before the VAT return.
