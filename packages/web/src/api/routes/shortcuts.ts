@@ -52,6 +52,13 @@ const asAdmin = new Hono()
   })
   .route("/", bookingsRoute);
 
+/** Accepts an explicit id, or the "Name #14" label the picker endpoints return (so a Shortcut can pass the chosen text as-is). */
+function idFrom(value: unknown, ref: unknown): number {
+  if (value != null && value !== "") return Number(value);
+  const m = /#(\d+)\s*$/.exec(String(ref ?? ""));
+  return m ? Number(m[1]) : NaN;
+}
+
 const firstName = (full: string) => full.trim().split(/\s+/)[0] ?? "";
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -164,12 +171,13 @@ export const shortcutsRoute = new Hono()
       .where(like(clients.name, `%${q.replace(/[%_]/g, "")}%`))
       .limit(8);
     await recordAudit({ actor: ACTOR, action: "searched", entityType: "shortcuts_clients", metadata: { results: rows.length } });
-    return c.json({ clients: rows }, 200);
+    return c.json({ clients: rows, labels: rows.map((r) => `${r.name} #${r.id}`) }, 200);
   })
   // Durable payment link for a client's latest unpaid invoice (never creates or changes an invoice).
   .post("/payment-link", async (c) => {
     const body = await c.req.json().catch(() => ({}));
-    const clientId = Number((body as { clientId?: unknown }).clientId);
+    const b = body as { clientId?: unknown; clientRef?: unknown };
+    const clientId = idFrom(b.clientId, b.clientRef);
     if (!Number.isInteger(clientId)) return c.json({ message: "clientId is required", summary: "Falta escolher a cliente." }, 400);
 
     const [client] = await db.select().from(clients).where(eq(clients.id, clientId));
@@ -205,13 +213,13 @@ export const shortcutsRoute = new Hono()
       .select({ id: services.id, name: services.name, price: services.price, durationMinutes: services.durationMinutes })
       .from(services)
       .where(eq(services.active, true));
-    return c.json({ services: rows }, 200);
+    return c.json({ services: rows, labels: rows.map((r) => `${r.name} · €${r.price.toFixed(0)} #${r.id}`) }, 200);
   })
   // "Marcar sessão": client + service + day + time. 409 when the slot is taken.
   .post("/book", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-    const clientId = Number(body.clientId);
-    const serviceId = Number(body.serviceId);
+    const clientId = idFrom(body.clientId, body.clientRef);
+    const serviceId = idFrom(body.serviceId, body.serviceRef);
     const date = String(body.date ?? "");
     const startTime = String(body.startTime ?? "");
     if (!Number.isInteger(clientId) || !Number.isInteger(serviceId) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(startTime)) {
