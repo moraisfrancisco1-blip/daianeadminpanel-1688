@@ -59,6 +59,24 @@ function idFrom(value: unknown, ref: unknown): number {
   return m ? Number(m[1]) : NaN;
 }
 
+/** Digits-only international number for wa.me (assumes the Netherlands for local 06… numbers). */
+function whatsappNumber(phone: string | null): string | null {
+  if (!phone) return null;
+  let d = phone.replace(/\D/g, "");
+  if (d.startsWith("00")) d = d.slice(2);
+  else if (d.startsWith("0")) d = "31" + d.slice(1);
+  else if (d.startsWith("310")) d = "31" + d.slice(3); // "31 06…" written with the trunk zero
+  return d.length >= 9 ? d : null;
+}
+
+function paymentMessage(lang: string | null, name: string, invoiceNumber: string, total: number, url: string): string {
+  const amount = `€${total.toFixed(2)}`;
+  const l = (lang ?? "").toLowerCase();
+  if (l.startsWith("nl")) return `Hoi ${name}! Hier is de betaallink voor factuur ${invoiceNumber} (${amount}): ${url}`;
+  if (l.startsWith("en")) return `Hi ${name}! Here is the payment link for invoice ${invoiceNumber} (${amount}): ${url}`;
+  return `Olá ${name}! Aqui está o link para pagar a fatura ${invoiceNumber} (${amount}): ${url}`;
+}
+
 const firstName = (full: string) => full.trim().split(/\s+/)[0] ?? "";
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -209,9 +227,15 @@ export const shortcutsRoute = new Hono()
     if ("reason" in result) return c.json({ message: result.reason, summary: result.reason }, 500);
     const url = payUrl(await ensurePayToken(invoice));
     await recordAudit({ actor: ACTOR, action: "payment_link_created", entityType: "invoice", entityId: invoice.id, metadata: { source: "shortcuts" } });
+    const number = whatsappNumber(client.phone);
+    const message = paymentMessage(client.preferredLanguage, firstName(client.name), invoice.invoiceNumber, invoice.total, url);
+    // Ready to open: wa.me with the cleaned number when there is one, otherwise WhatsApp's own contact picker.
+    const whatsapp = `https://wa.me/${number ?? ""}?text=${encodeURIComponent(message)}`;
     return c.json(
       {
         url,
+        whatsapp,
+        message,
         invoiceNumber: invoice.invoiceNumber,
         total: invoice.total,
         phone: client.phone,
