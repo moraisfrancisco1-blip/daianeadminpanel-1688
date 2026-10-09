@@ -30,6 +30,7 @@ import { rateLimitByIp } from "./lib/rate-limit";
 import { servicePaymentControlRoute } from "./routes/service/payment-control";
 import { serviceBookingsSummaryRoute } from "./routes/service/bookings-summary";
 import { serviceClientsSummaryRoute } from "./routes/service/clients-summary";
+import { shortcutsRoute } from "./routes/shortcuts";
 import { serviceSystemHealthRoute } from "./routes/service/system-health";
 
 const app = new Hono()
@@ -59,6 +60,11 @@ const app = new Hono()
   .route("/api/service/bookings-summary", serviceBookingsSummaryRoute)
   .route("/api/service/clients-summary", serviceClientsSummaryRoute)
   .route("/api/service/system-health", serviceSystemHealthRoute)
+  // iPhone Shortcuts / Scriptable widgets (SHORTCUTS_TOKEN bearer). Before authMiddleware — own auth,
+  // and rate-limited per IP like the other token-authenticated entry points.
+  .use("/api/shortcuts/*", rateLimitByIp({ method: "GET", prefix: "shortcuts-get", limit: 60, windowMs: 15 * 60 * 1000 }))
+  .use("/api/shortcuts/*", rateLimitByIp({ method: "POST", prefix: "shortcuts-post", limit: 30, windowMs: 15 * 60 * 1000 }))
+  .route("/api/shortcuts", shortcutsRoute)
   // The public booking form has no login gate, so cap creates per IP —
   // 20 per hour is generous for a real client, tight for a spam script.
   .use("/api/bookings", rateLimitByIp({ method: "POST", prefix: "public-booking", limit: 20, windowMs: 60 * 60 * 1000 }))
