@@ -76,7 +76,13 @@ export const shortcutsRoute = new Hono()
     const nowTime = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date());
     const items = rows.map((r) => ({ time: r.startTime, name: firstName(r.name), done: r.status === "completed" || r.startTime < nowTime }));
     await recordAudit({ actor: ACTOR, action: "viewed", entityType: "shortcuts_today", metadata: { count: items.length } });
-    return c.json({ date: today, total: items.length, remaining: items.filter((i) => !i.done).length, items }, 200);
+    const upcoming = items.filter((i) => !i.done);
+    const summary = items.length === 0
+      ? "Sem marcações hoje."
+      : upcoming.length === 0
+        ? `Hoje tiveste ${items.length} sessões, já não há mais.`
+        : `Hoje ${items.length} marcações, ${upcoming.length} por vir: ` + upcoming.map((i) => `${i.time} ${i.name}`).join(", ") + ".";
+    return c.json({ summary, date: today, total: items.length, remaining: upcoming.length, items }, 200);
   })
   // Money snapshot: only totals and counts, no client data.
   .get("/stats", async (c) => {
@@ -111,8 +117,12 @@ export const shortcutsRoute = new Hono()
       }
     }
     await recordAudit({ actor: ACTOR, action: "viewed", entityType: "shortcuts_stats" });
+    const eur = (n: number) => `€${round2(n).toFixed(2).replace(/\.00$/, "")}`;
+    const summary =
+      `Hoje ${eur(day)}. Esta semana ${eur(week)}. ` +
+      (overdueCount ? `${overdueCount} fatura${overdueCount === 1 ? "" : "s"} em atraso, ${eur(overdueTotal)}.` : "Nenhuma fatura em atraso.");
     return c.json(
-      { revenueToday: round2(day), revenueWeek: round2(week), overdueCount, overdueTotal: round2(overdueTotal), awaitingCount },
+      { summary, revenueToday: round2(day), revenueWeek: round2(week), overdueCount, overdueTotal: round2(overdueTotal), awaitingCount },
       200,
     );
   })
@@ -133,7 +143,11 @@ export const shortcutsRoute = new Hono()
       .filter((r) => r.remaining > 0 && (r.remaining <= 1 || (r.daysLeft !== null && r.daysLeft <= 14)) && (r.daysLeft === null || r.daysLeft >= 0))
       .sort((a, b) => (a.daysLeft ?? 999) - (b.daysLeft ?? 999) || a.remaining - b.remaining);
     await recordAudit({ actor: ACTOR, action: "viewed", entityType: "shortcuts_packages", metadata: { count: items.length } });
-    return c.json({ total: items.length, items }, 200);
+    const summary = items.length === 0
+      ? "Nenhum pacote a terminar."
+      : `${items.length} pacote${items.length === 1 ? "" : "s"} a renovar: ` +
+        items.map((i) => `${i.name} (${i.remaining} sessão${i.remaining === 1 ? "" : "ões"}${i.daysLeft !== null ? `, ${i.daysLeft} dias` : ""})`).join(", ") + ".";
+    return c.json({ summary, total: items.length, items }, 200);
   })
   // "Próxima cliente": the next session today, and whether she has an active package / an unpaid invoice.
   .get("/next", async (c) => {
